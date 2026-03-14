@@ -555,10 +555,13 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
               {editField === "inventory" ? (
                 <div className="flex items-center justify-between py-2 px-1">
                   <span className="text-xs text-muted-foreground w-24 shrink-0">Inventory</span>
+                                <div className="relative">
                   <Input value={editValue} onChange={e => setEditValue(e.target.value)} type="text" inputMode="decimal"
                     className="h-7 text-sm w-32 text-right pr-7" autoFocus
                     onBlur={commitEdit}
                     onKeyDown={e => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditField(null); }} />
+                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">g</span>
+                                                  </div>
                 </div>
               ) : (
                 <button className="flex items-center justify-between py-2.5 px-1 w-full text-left hover:bg-secondary/20 transition-colors rounded"
@@ -574,12 +577,13 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
                   {editField === "costManual" ? (
                     <div className="flex items-center justify-between py-2 px-1">
                       <span className="text-xs text-muted-foreground w-24 shrink-0">Cost / g</span>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 relative">
                         <span className="text-xs text-muted-foreground">€</span>
                         <Input value={editValue} onChange={e => setEditValue(e.target.value)} type="text" inputMode="decimal"
                           className="h-7 text-sm w-32 text-right pr-10" autoFocus
                           onBlur={commitEdit}
                           onKeyDown={e => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditField(null); }} />
+                                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">/g</span>
                       </div>
                     </div>
                   ) : (
@@ -604,13 +608,12 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
               {editField === "ifra" ? (
                 <div className="flex items-center justify-between py-2 px-1">
                   <span className="text-xs text-muted-foreground w-24 shrink-0">IFRA limit</span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 relative">
                     <Input value={editValue} onChange={e => setEditValue(e.target.value)} type="text" inputMode="decimal"
                       className="h-7 text-sm w-28 text-right pr-7" autoFocus
                       onBlur={commitEdit}
                       onKeyDown={e => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditField(null); }} />
-                    <span className="text-xs text-muted-foreground">%</span>
-                  </div>
+                                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">%</span>
                 </div>
               ) : (
                 <button className="flex items-center justify-between py-2.5 px-1 w-full text-left hover:bg-secondary/20 transition-colors rounded"
