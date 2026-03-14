@@ -481,6 +481,8 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
         <p
           className="text-sm italic text-muted-foreground mt-0.5 cursor-pointer hover:bg-secondary/20 rounded px-2 py-1 -ml-2 transition-colors"
           onClick={() => startEdit("cas", material.botanicalName || material.casNumber || "")}
+                  >{material.botanicalName || material.casNumber ? (material.botanicalName || `CAS ${material.casNumber}`) : "CAS # / Botanical Name..."}</p>
+      )}
           <div className="space-y-0">
             <div className="divide-y divide-border/50">
               {/* Category — dropdown */}
