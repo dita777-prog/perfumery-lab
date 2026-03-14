@@ -766,7 +766,7 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
             ))}
             {ifraLimits.length === 0 && <p className="text-sm text-muted-foreground">No IFRA limits set</p>}
           </div>
-      </Tabs>
+      
 
       <DilutionCalculator open={showCalc} onOpenChange={setShowCalc} materialName={material.name} />
       <CostCalculatorDialog open={showCostCalc} onOpenChange={setShowCostCalc} materialId={material.id} sources={sources} />
