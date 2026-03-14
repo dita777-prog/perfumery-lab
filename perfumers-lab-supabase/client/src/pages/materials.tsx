@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Plus, Pencil, Trash2, Calculator, ChevronDown, ChevronRight, Tag, Minus, CalendarIcon, Check, ChevronsUpDown, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -138,7 +138,27 @@ function EnhancedCalendarPickerGeneric({ value, onSave, onRemove, open, onOpenCh
 export default function MaterialsPage() {
   const { toast } = useToast();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+    const createMaterialMut = useMutation({
+    mutationFn: () => postJson("/api/materials", { name: "New material" }),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/materials"] });
+      setSelectedId(data.id);
+    },
+    onError: () => toast({ title: "Failed to create material", variant: "destructive" }),
+  });
+
+  const deleteMaterialMut = useMutation({
+    mutationFn: (id: string) => deleteJson(`/api/materials/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/materials"] });
+      if (selectedId === deleteConfirmId) setSelectedId(null);
+      setDeleteConfirmId(null);
+      toast({ title: "Material deleted" });
+    },
+    onError: () => toast({ title: "Failed to delete material", variant: "destructive" }),
+  });
   const [showCreateFamily, setShowCreateFamily] = useState(false);
   const [editFamilyId, setEditFamilyId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -170,7 +190,7 @@ export default function MaterialsPage() {
           <Button size="sm" variant="ghost" onClick={() => setShowCreateFamily(true)} data-testid="button-add-family-sidebar" title="Add olfactive family">
             <Tag size={14} />
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setShowCreate(true)} data-testid="button-add-material">
+          <Button size="sm" variant="ghost" onClick={() => createMaterialMut.mutate()} disabled={createMaterialMut.isPending} data-testid="button-add-material">
             <Plus size={14} />
           </Button>
         </div>
@@ -196,39 +216,31 @@ export default function MaterialsPage() {
                   </button>
                 </div>
               )}
-              {mats.map((m: any) => {
-                const mFamily = families.find((f: any) => f.id === m.olfactiveFamilyId);
-                const mColor = mFamily?.color || "#888";
-                const isUnknown = !m.pyramidRole || m.pyramidRole === "unknown";
-                return (
-                  <div key={m.id}
-                    className={`px-3 py-1.5 text-sm cursor-pointer flex items-center gap-2 hover:bg-secondary/50 transition-colors
-                      ${selectedId === m.id ? 'bg-[hsl(183,70%,36%)]/10 text-[hsl(183,70%,50%)]' : 'text-foreground/80'}`}
-                    onClick={() => setSelectedId(m.id)}
-                    data-testid={`material-item-${m.id}`}
-                  >
-                    <span className="truncate flex-1">{m.name}</span>
-                    <PyramidIcon size={15} color={isUnknown ? "#666" : mColor} unknown={isUnknown} className="shrink-0 opacity-70" />
-                  </div>
-                );
-              })}
+                          {mats.map((m: any) => (
+              <MaterialListItem
+                key={m.id}
+                m={m}
+                selectedId={selectedId}
+                families={families}
+                onSelect={setSelectedId}
+                onDeleteRequest={setDeleteConfirmId}
+              />
+            ))}
             </div>
           ))}
           {ungrouped.length > 0 && (
             <div>
               <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Uncategorized</div>
-              {ungrouped.map((m: any) => {
-                const isUnknown = !m.pyramidRole || m.pyramidRole === "unknown";
-                return (
-                  <div key={m.id}
-                    className={`px-3 py-1.5 text-sm cursor-pointer flex items-center gap-2 hover:bg-secondary/50 ${selectedId === m.id ? 'bg-[hsl(183,70%,36%)]/10' : ''}`}
-                    onClick={() => setSelectedId(m.id)}
-                  >
-                    <span className="truncate flex-1">{m.name}</span>
-                    <PyramidIcon size={15} color={isUnknown ? "#666" : "#888"} unknown={isUnknown} className="shrink-0 opacity-70" />
-                  </div>
-                );
-              })}
+                          {ungrouped.map((m: any) => (
+              <MaterialListItem
+                key={m.id}
+                m={m}
+                selectedId={selectedId}
+                families={families}
+                onSelect={setSelectedId}
+                onDeleteRequest={setDeleteConfirmId}
+              />
+            ))}
             </div>
           )}
         </div>
@@ -243,7 +255,31 @@ export default function MaterialsPage() {
         )}
       </div>
 
-      <CreateMaterialDialog open={showCreate} onOpenChange={setShowCreate} families={families} />
+      {/* Delete confirm dialog */}
+            <Dialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete material</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground mt-2">
+            Are you sure you want to delete{" "}
+            <span className="font-medium text-foreground">
+              "{materials.find((m: any) => m.id === deleteConfirmId)?.name}"
+            </span>
+            ? This action cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="ghost" onClick={() => setDeleteConfirmId(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => { if (deleteConfirmId) deleteMaterialMut.mutate(deleteConfirmId); }}
+              disabled={deleteMaterialMut.isPending}
+            >
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <CreateFamilyDialog open={showCreateFamily} onOpenChange={setShowCreateFamily} familyCount={families.length} />
     </div>
   );
@@ -1379,5 +1415,75 @@ function InlineEditFamily({ family, onClose }: { family: any; onClose: () => voi
         ✕
       </Button>
     </div>
+  );
+}
+
+// ─── Material List Item with context menu + swipe ──────────────
+function MaterialListItem({ m, selectedId, families, onSelect, onDeleteRequest }: {
+  m: any;
+  selectedId: string | null;
+  families: any[];
+  onSelect: (id: string) => void;
+  onDeleteRequest: (id: string) => void;
+}) {
+  const mFamily = families.find((f: any) => f.id === m.olfactiveFamilyId);
+  const mColor = mFamily?.color || "#888";
+  const isUnknown = !m.pyramidRole || m.pyramidRole === "unknown";
+
+  const [showDelete, setShowDelete] = useState(false);
+  const touchStartX = useRef<number>(0);
+  const touchStartY = useRef<number>(0);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+    setShowDelete(false);
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const dx = touchStartX.current - e.changedTouches[0].clientX;
+    const dy = Math.abs(touchStartY.current - e.changedTouches[0].clientY);
+    if (dx > 60 && dy < 40) {
+      setShowDelete(true);
+    } else if (dx < -20) {
+      setShowDelete(false);
+    }
+  };
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="relative overflow-hidden">
+          <div
+            className={`px-3 py-1.5 text-sm cursor-pointer flex items-center gap-2 hover:bg-secondary/50 transition-all duration-200
+              ${selectedId === m.id ? 'bg-[hsl(183,70%,36%)]/10 text-[hsl(183,70%,50%)]' : 'text-foreground/80'}`}
+            style={{ transform: showDelete ? 'translateX(-80px)' : 'translateX(0)', transition: 'transform 0.2s ease' }}
+            onClick={() => { if (showDelete) { setShowDelete(false); } else { onSelect(m.id); } }}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            data-testid={`material-item-${m.id}`}
+          >
+            <span className="truncate flex-1">{m.name}</span>
+            <PyramidIcon size={15} color={isUnknown ? "#666" : mColor} unknown={isUnknown} className="shrink-0 opacity-70" />
+          </div>
+          {showDelete && (
+            <button
+              className="absolute right-0 top-0 h-full w-20 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold flex items-center justify-center"
+              onClick={(e) => { e.stopPropagation(); onDeleteRequest(m.id); setShowDelete(false); }}
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="bg-card border-border">
+        <ContextMenuItem
+          className="text-red-500 focus:text-red-500 focus:bg-red-500/10 cursor-pointer"
+          onClick={() => onDeleteRequest(m.id)}
+        >
+          Delete material
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
