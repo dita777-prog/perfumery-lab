@@ -450,20 +450,37 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
 
   return (
     <div className="p-6 max-w-3xl">
-      <h1 className="text-xl font-semibold" data-testid="text-material-name">{material.name}</h1>
-      {material.botanicalName && <p className="text-sm italic text-muted-foreground mt-0.5">{material.botanicalName}</p>}
-      {material.casNumber && !material.botanicalName && <p className="text-sm text-muted-foreground mt-0.5">CAS {material.casNumber}</p>}
-
-      <Tabs defaultValue="info" className="w-full mt-4">
-        <TabsList className="bg-secondary/50 mb-4">
-          <TabsTrigger value="info" className="text-xs">Info</TabsTrigger>
-          <TabsTrigger value="behavior" className="text-xs">Behavior</TabsTrigger>
-          <TabsTrigger value="suppliers" className="text-xs">Suppliers ({sources.length})</TabsTrigger>
-          <TabsTrigger value="dilutions" className="text-xs">Dilutions ({dilutions.length})</TabsTrigger>
-          <TabsTrigger value="ifra" className="text-xs">IFRA ({ifraLimits.length})</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="info">
+            {editField === "name" ? (
+        <Input
+          value={editValue}
+          onChange={e => setEditValue(e.target.value)}
+          className="text-xl font-semibold h-auto py-1 px-2 -ml-2"
+          autoFocus
+          onBlur={() => { updateMaterialMut.mutate({ name: editValue || material.name }); setEditField(null); }}
+          onKeyDown={e => { if (e.key === "Enter") { updateMaterialMut.mutate({ name: editValue || material.name }); setEditField(null); } if (e.key === "Escape") setEditField(null); }}
+          data-testid="input-material-name"
+        />
+      ) : (
+        <h1
+          className="text-xl font-semibold cursor-pointer hover:bg-secondary/20 rounded px-2 py-1 -ml-2 transition-colors"
+          onClick={() => startEdit("name", material.name)}
+          data-testid="text-material-name"
+        >{material.name}</h1>
+      )}
+      {editField === "cas" ? (
+        <Input
+          value={editValue}
+          onChange={e => setEditValue(e.target.value)}
+          placeholder="CAS # / Botanical Name..."
+          className="text-sm h-auto py-1 px-2 -ml-2 mt-1 italic text-muted-foreground"
+          autoFocus
+          onBlur={() => { updateMaterialMut.mutate({ casNumber: editValue || null, botanicalName: editValue || null }); setEditField(null); }}
+          onKeyDown={e => { if (e.key === "Enter") { updateMaterialMut.mutate({ casNumber: editValue || null, botanicalName: editValue || null }); setEditField(null); } if (e.key === "Escape") setEditField(null); }}
+        />
+      ) : (
+        <p
+          className="text-sm italic text-muted-foreground mt-0.5 cursor-pointer hover:bg-secondary/20 rounded px-2 py-1 -ml-2 transition-colors"
+          onClick={() => startEdit("cas", material.botanicalName || material.casNumber || "")}
           <div className="space-y-0">
             <div className="divide-y divide-border/50">
               {/* Category — dropdown */}
@@ -730,26 +747,14 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
               ) : <p className="text-sm text-muted-foreground/50 py-1">Not used in any formula</p>}
             </div>
           </div>
-        </TabsContent>
-
-        <TabsContent value="behavior">
           <div className="space-y-4">
             <InfoRow label="In wax" value={material.behaviorWax} />
             <InfoRow label="In alcohol" value={material.behaviorAlcohol} />
             <InfoRow label="In nebulizer" value={material.behaviorNebulizer} />
             <InfoRow label="In diffuser" value={material.behaviorDiffuser} />
           </div>
-        </TabsContent>
-
-        <TabsContent value="suppliers">
           <SuppliersTab materialId={material.id} sources={sources} suppliers={suppliers} />
-        </TabsContent>
-
-        <TabsContent value="dilutions">
           <DilutionsTab materialId={material.id} dilutions={dilutions} materialName={material.name} />
-        </TabsContent>
-
-        <TabsContent value="ifra">
           <div className="space-y-2">
             {ifraLimits.map((l: any) => (
               <div key={l.id} className="bg-card rounded-lg p-3 border border-border flex justify-between">
@@ -759,7 +764,6 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
             ))}
             {ifraLimits.length === 0 && <p className="text-sm text-muted-foreground">No IFRA limits set</p>}
           </div>
-        </TabsContent>
       </Tabs>
 
       <DilutionCalculator open={showCalc} onOpenChange={setShowCalc} materialName={material.name} />
