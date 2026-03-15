@@ -619,6 +619,7 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
                       onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") setEditField(null); }} />
                                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">%</span>
                 </div>
+                            </div>
               ) : (
                 <button className="flex items-center justify-between py-2.5 px-1 w-full text-left hover:bg-secondary/20 transition-colors rounded"
                   onClick={() => startEdit("ifra", firstIfra ? firstIfra.limitPercent : "")}>
