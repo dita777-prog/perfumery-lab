@@ -405,6 +405,9 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
       // Update the first source's stockGrams, or create a source if none
       if (sources.length > 0) {
         updateSourceMut.mutate({ id: sources[0].id, data: { stockGrams: editValue || null } });
+         else if (editValue) {
+        createSourceMut.mutate({ materialId: material.id, stockGrams: editValue });
+      }
       }
     } else if (editField === "ifra") {
       if (firstIfra) {
@@ -419,6 +422,9 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
     } else if (editField === "costManual") {
       if (sources.length > 0) {
         updateSourceMut.mutate({ id: sources[0].id, data: { pricePerGram: editValue || null } });
+         else if (editValue) {
+        createSourceMut.mutate({ materialId: material.id, pricePerGram: editValue, stockGrams: "0" });
+      }
       }
     }
     setEditField(null);
