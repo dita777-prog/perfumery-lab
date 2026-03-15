@@ -420,7 +420,7 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
       }
     } else if (editField === "costManual") {
       if (sources.length > 0) {
-        patchJson(`/api/material-sources/${sources[0].id}`, { pricePerGram: editValue || null }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("cost update failed", err));
+        patchJson(`/api/material-sources/${sources[0].id}`, { pricePerGram: editValue || null, purchasePrice: null, purchaseQuantityGrams: null }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("cost update failed", err));
          } else if (editValue) {
         postJson("/api/material-sources", { materialId: material.id, pricePerGram: editValue, stockGrams: "0" }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("cost create failed", err));
       }
