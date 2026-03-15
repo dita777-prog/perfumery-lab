@@ -404,9 +404,9 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
     if (editField === "inventory") {
       // Update the first source's stockGrams, or create a source if none
       if (sources.length > 0) {
-        updateSourceMut.mutate({ id: sources[0].id, data: { stockGrams: editValue || null } });
+        patchJson(`/api/material-sources/${sources[0].id}`, { stockGrams: editValue || null }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("inventory update failed", err));
          } else if (editValue) {
-        createSourceMut.mutate({ materialId: material.id, stockGrams: editValue });
+        postJson("/api/material-sources", { materialId: material.id, stockGrams: editValue }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("inventory create failed", err));
 }
     } else if (editField === "ifra") {
       if (firstIfra) {
@@ -420,9 +420,9 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
       }
     } else if (editField === "costManual") {
       if (sources.length > 0) {
-        updateSourceMut.mutate({ id: sources[0].id, data: { pricePerGram: editValue || null } });
+        patchJson(`/api/material-sources/${sources[0].id}`, { pricePerGram: editValue || null }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("cost update failed", err));
          } else if (editValue) {
-        createSourceMut.mutate({ materialId: material.id, pricePerGram: editValue, stockGrams: "0" });
+        postJson("/api/material-sources", { materialId: material.id, pricePerGram: editValue, stockGrams: "0" }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("cost create failed", err));
       }
       }
         setEditField(null);
