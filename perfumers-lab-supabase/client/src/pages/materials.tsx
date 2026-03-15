@@ -401,28 +401,29 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
   const startEdit = (field: string, value: string) => { setEditField(field); setEditValue(value); };
   const commitEdit = () => {
     if (!editField) return;
+    const val = editValue.replace(",", ".");
     if (editField === "inventory") {
       // Update the first source's stockGrams, or create a source if none
       if (sources.length > 0) {
-        patchJson(`/api/material-sources/${sources[0].id}`, { stockGrams: editValue || null }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("inventory update failed", err));
+        patchJson(`/api/material-sources/${sources[0].id}`, { stockGrams: val || null }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("inventory update failed", err));
          } else if (editValue) {
-        postJson("/api/material-sources", { materialId: material.id, stockGrams: editValue }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("inventory create failed", err));
+        postJson("/api/material-sources", { materialId: material.id, stockGrams: val }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("inventory create failed", err));
 }
     } else if (editField === "ifra") {
       if (firstIfra) {
-        patchJson(`/api/ifra-limits/${firstIfra.id}`, { limitPercent: editValue || null }).then(() => {
+        patchJson(`/api/ifra-limits/${firstIfra.id}`, { limitPercent: val || null }).then(() => {
           queryClient.invalidateQueries({ queryKey: ["/api/materials", material.id, "ifra-limits"] });
         });
       } else if (editValue) {
-        postJson("/api/ifra-limits", { materialId: material.id, productType: "General", limitPercent: editValue }).then(() => {
+        postJson("/api/ifra-limits", { materialId: material.id, productType: "General", limitPercent: val }).then(() => {
           queryClient.invalidateQueries({ queryKey: ["/api/materials", material.id, "ifra-limits"] });
         });
       }
     } else if (editField === "costManual") {
       if (sources.length > 0) {
-        patchJson(`/api/material-sources/${sources[0].id}`, { pricePerGram: editValue || null, purchasePrice: null, purchaseQuantityGrams: null }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("cost update failed", err));
+        patchJson(`/api/material-sources/${sources[0].id}`, { pricePerGram: val || null, purchasePrice: null, purchaseQuantityGrams: null }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("cost update failed", err));
          } else if (editValue) {
-        postJson("/api/material-sources", { materialId: material.id, pricePerGram: editValue, stockGrams: "0" }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("cost create failed", err));
+        postJson("/api/material-sources", { materialId: material.id, pricePerGram: val, stockGrams: "0" }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("cost create failed", err));
       }
       }
         setEditField(null);
