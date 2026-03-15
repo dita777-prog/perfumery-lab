@@ -425,7 +425,7 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
         createSourceMut.mutate({ materialId: material.id, pricePerGram: editValue, stockGrams: "0" });
       }
       }
-    }setEditField(null);
+        setEditField(null);
     setEditValue("");
   };
 
@@ -563,7 +563,7 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
                   <Input value={editValue} onChange={e => setEditValue(e.target.value)} type="text" inputMode="decimal"
                     className="h-7 text-sm w-32 text-right pr-7" autoFocus
                     onBlur={commitEdit}
-                    onKeyDown={e => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditField(null); }} />
+                    onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") setEditField(null); }} />
                                     <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">g</span>
                                                   </div>
                 </div>
@@ -586,7 +586,7 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
                         <Input value={editValue} onChange={e => setEditValue(e.target.value)} type="text" inputMode="decimal"
                           className="h-7 text-sm w-32 text-right pr-10" autoFocus
                           onBlur={commitEdit}
-                          onKeyDown={e => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditField(null); }} />
+                          onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") setEditField(null); }} />
                                           <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">/g</span>
                       </div>
                     </div>
@@ -616,7 +616,7 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
                     <Input value={editValue} onChange={e => setEditValue(e.target.value)} type="text" inputMode="decimal"
                       className="h-7 text-sm w-28 text-right pr-7" autoFocus
                       onBlur={commitEdit}
-                      onKeyDown={e => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditField(null); }} />
+                      onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") setEditField(null); }} />
                                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">%</span>
                 </div>
               ) : (
