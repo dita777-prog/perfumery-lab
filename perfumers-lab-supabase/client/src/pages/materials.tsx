@@ -407,8 +407,7 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
         updateSourceMut.mutate({ id: sources[0].id, data: { stockGrams: editValue || null } });
          } else if (editValue) {
         createSourceMut.mutate({ materialId: material.id, stockGrams: editValue });
-      }
-      }
+}
     } else if (editField === "ifra") {
       if (firstIfra) {
         patchJson(`/api/ifra-limits/${firstIfra.id}`, { limitPercent: editValue || null }).then(() => {
@@ -426,8 +425,7 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
         createSourceMut.mutate({ materialId: material.id, pricePerGram: editValue, stockGrams: "0" });
       }
       }
-    }
-    setEditField(null);
+    }setEditField(null);
     setEditValue("");
   };
 
