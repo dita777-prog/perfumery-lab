@@ -100,3 +100,10 @@
 .cursor-context-menu {
   cursor: context-menu;
 }
+
+/* Fix truncated category names on mobile */
+@media (max-width: 768px) {
+  .panel-layout > div:first-child {
+    min-width: 0;
+  }
+}
