@@ -107,3 +107,10 @@
     min-width: 0;
   }
 }
+
+/* Auto-expand description textarea */
+[data-testid="textarea-description"] {
+  field-sizing: content;
+  min-height: 80px;
+  overflow: hidden;
+}
