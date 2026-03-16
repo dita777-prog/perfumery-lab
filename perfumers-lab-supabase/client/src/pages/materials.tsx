@@ -697,7 +697,7 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
                 onChange={e => { setDescription(e.target.value); setDescDirty(true); }}
                 onBlur={saveDescription}
                 placeholder="Sensory notes, personal impressions, usage tips..."
-                rows={3} className="text-sm resize-none" data-testid="textarea-description" />
+                rows={12} className="text-sm resize-none" data-testid="textarea-description" />
               {descDirty && <p className="text-[10px] text-muted-foreground mt-1">Unsaved — click outside to save</p>}
             </div>
 
