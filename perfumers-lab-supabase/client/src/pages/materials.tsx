@@ -184,7 +184,7 @@ export default function MaterialsPage() {
   return (
     <div className="panel-layout h-full">
       {/* Left panel */}
-      <div className="border-r border-border flex flex-col h-full overflow-hidden">
+            <div className={`border-r border-border flex-col h-full overflow-hidden ${selectedId ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-3 border-b border-border flex items-center gap-2">
           <h2 className="text-sm font-semibold flex-1">Materials</h2>
           <Button size="sm" variant="ghost" onClick={() => setShowCreateFamily(true)} data-testid="button-add-family-sidebar" title="Add olfactive family">
@@ -247,9 +247,14 @@ export default function MaterialsPage() {
       </div>
 
       {/* Right panel */}
-      <div className="flex-1 overflow-y-auto">
+            <div className={`flex-1 overflow-y-auto ${selectedId ? '' : 'hidden md:block'}`}>
         {selected ? (
+                  <div>
+              <button className="md:hidden flex items-center gap-1 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b border-border w-full" onClick={() => setSelectedId(null)}>
+                <ChevronRight className="rotate-180 h-4 w-4" /> Back to list
+              </button>
           <MaterialDetail material={selected} families={families} sources={materialSources} suppliers={suppliers} />
+                                </div>
         ) : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">Select a material</div>
         )}
