@@ -1,7 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useState, useRef } from "react";
-import { Plus, Pencil, Trash2, Calculator, ChevronDown, ChevronRight, Tag, Minus, CalendarIcon, Check, ChevronsUpDown, HelpCircle } from "lucide-react";
+import { Plus, Droplets, Pencil, Trash2, Calculator, ChevronDown, ChevronRight, Tag, Minus, CalendarIcon, Check, ChevronsUpDown, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -1492,7 +1492,7 @@ function MaterialListItem({ m, selectedId, families, onSelect, onDeleteRequest }
             data-testid={`material-item-${m.id}`}
           >
             <span className="truncate flex-1">{m.name}</span>
-            <PyramidIcon size={15} color={isUnknown ? "#666" : mColor} unknown={isUnknown} role={m.pyramidRole || "top"} className="shrink-0 opacity-70" />
+            {m.treatAsSolvent ? <Droplets size={15} className="shrink-0 opacity-60 text-[hsl(200,80%,65%)]" /> : <PyramidIcon size={15} color={isUnknown ? "#666" : mColor} unknown={isUnknown} role={m.pyramidRole || "top"} className="shrink-0 opacity-70" />}
           </div>
           {showDelete && (
             <button
