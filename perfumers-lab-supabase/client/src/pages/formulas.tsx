@@ -624,9 +624,9 @@ function ContextMenuItem({ label, onClick, disabled, destructive }: { label: str
 // ─── Add Ingredient Dialog (simplified: material or formula) ────
 
 function ChangeRawMaterialDialog({ ing, materials, allFormulas, formulaId, onClose }) {
-  const [sourceType, setSourceType] = React.useState(ing.sourceType || "material");
-  const [sourceId, setSourceId] = React.useState("");
-  const [search, setSearch] = React.useState("");
+  const [sourceType, setSourceType] = useState(ing.sourceType || "material");
+  const [sourceId, setSourceId] = useState("");
+  const [search, setSearch] = useState("");
   const mutation = useMutation({
     mutationFn: ({ id, data }) => patchJson(`/api/formula-ingredients/${id}`, data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/formulas", formulaId, "ingredients"] }); onClose(); },
