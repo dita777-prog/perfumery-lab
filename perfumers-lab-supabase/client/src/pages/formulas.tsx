@@ -25,6 +25,23 @@ export default function FormulasPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showCatManager, setShowCatManager] = useState(false);
   const [filter, setFilter] = useState("");
+    const { toast } = useToast();
+    const [formulaCtxMenu, setFormulaCtxMenu] = useState<{ x: number; y: number; formula: any } | null>(null);
+    const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+    const deleteFormulaMut = useMutation({
+          mutationFn: (id: string) => deleteJson(`/api/formulas/${id}`),
+          onSuccess: () => {
+                  queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+                  setConfirmDeleteId(null);
+                  setSelectedId(null);
+                  toast({ title: "Formula deleted" });
+                },
+        });
+    useEffect(() => {
+          const handler = () => setFormulaCtxMenu(null);
+          if (formulaCtxMenu) window.addEventListener("click", handler);
+          return () => window.removeEventListener("click", handler);
+        }, [formulaCtxMenu]);
 
   const { data: formulas = [] } = useQuery<any[]>({ queryKey: ["/api/formulas"] });
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/formula-categories"] });
@@ -66,6 +83,7 @@ export default function FormulasPage() {
                   className={`px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50 transition-colors
                     ${selectedId === f.id ? 'bg-[hsl(183,70%,36%)]/10 text-[hsl(183,70%,50%)]' : 'text-foreground/80'}`}
                   onClick={() => setSelectedId(f.id)}
+                                  onContextMenu={(e) => { e.preventDefault(); setFormulaCtxMenu({ x: e.clientX, y: e.clientY, formula: f }); }}
                   data-testid={`formula-item-${f.id}`}
                 >
                   <span className="truncate">{f.name}</span>
@@ -81,6 +99,7 @@ export default function FormulasPage() {
                   className={`px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50
                     ${selectedId === f.id ? 'bg-[hsl(183,70%,36%)]/10' : ''}`}
                   onClick={() => setSelectedId(f.id)}
+                                onContextMenu={(e) => { e.preventDefault(); setFormulaCtxMenu({ x: e.clientX, y: e.clientY, formula: f }); }}
                 >
                   {f.name}
                 </div>
@@ -98,6 +117,34 @@ export default function FormulasPage() {
 
       <CreateFormulaDialog open={showCreate} onOpenChange={setShowCreate} categories={categories} />
       <CategoryManagerDialog open={showCatManager} onOpenChange={setShowCatManager} />
+            {/* Formula context menu */}
+            {formulaCtxMenu && (
+              <div
+                          className="fixed bg-popover border border-border rounded-lg shadow-lg py-1 z-50 min-w-[180px]"
+                          style={{ left: formulaCtxMenu.x, top: formulaCtxMenu.y }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <button
+                                        className="block w-full text-left px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 transition-colors"
+                                        onClick={() => { setConfirmDeleteId(formulaCtxMenu.formula.id); setFormulaCtxMenu(null); }}
+                                      >
+                                        <Trash2 size={12} className="inline mr-1.5" /> Delete formula
+                                      </button>
+                        </div>
+            )}
+            {/* Delete confirmation dialog */}
+            <Dialog open={!!confirmDeleteId} onOpenChange={(v) => { if (!v) setConfirmDeleteId(null); }}>
+                      <DialogContent className="bg-card border-border max-w-sm">
+                                  <DialogHeader><DialogTitle>Delete Formula</DialogTitle></DialogHeader>
+                                  <p className="text-sm text-muted-foreground">Are you sure you want to delete this formula? This action cannot be undone.</p>
+                                  <div className="flex gap-2 justify-end mt-3">
+                                                <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+                                                <Button variant="destructive" disabled={deleteFormulaMut.isPending} onClick={() => confirmDeleteId && deleteFormulaMut.mutate(confirmDeleteId)}>
+                                                                {deleteFormulaMut.isPending ? "Deleting..." : "Delete"}
+                                                              </Button>
+                                              </div>
+                                </DialogContent>
+                    </Dialog>
     </div>
   );
 }
