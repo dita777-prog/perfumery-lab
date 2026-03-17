@@ -72,7 +72,7 @@ function EnhancedCalendarPicker({ value, onSave, onRemove, open, onOpenChange }:
           </span>
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="end">
+      <PopoverContent className="w-auto p-0" align="end" side="top">
         <Calendar mode="single"
           selected={selected}
           onSelect={(d) => { if (d) setSelected(d); }}
