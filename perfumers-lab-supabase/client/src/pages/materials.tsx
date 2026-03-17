@@ -21,22 +21,23 @@ import { fmtNum, fmtGrams } from "@/lib/api";
 import { postJson, patchJson, deleteJson } from "@/lib/api";
 
 // ─── Pyramid SVG Icon ───────────────────────────────────────────
-// Stacked horizontal bars forming a pyramid shape, like the Formulair reference
+// Filled pyramid with horizontal layer lines, like the reference screenshot
 function PyramidIcon({ size = 16, color = "currentColor", unknown = false, className = "" }: { size?: number; color?: string; unknown?: boolean; className?: string }) {
   if (unknown) {
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
-        <path d="M10.5 4L3 20h18L13.5 4" stroke={color} strokeWidth="1.8" strokeLinejoin="round" fill="none" />
-        <text x="12" y="17" textAnchor="middle" fontSize="10" fontWeight="600" fill={color}>?</text>
+        <path d="M12 3L4 21h16L12 3z" stroke={color} strokeWidth="1.5" strokeLinejoin="round" fill="none" />
+        <text x="12" y="17" textAnchor="middle" fontSize="9" fontWeight="600" fill={color}>?</text>
       </svg>
     );
   }
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
-      <line x1="9" y1="7" x2="15" y2="7" stroke={color} strokeWidth="2" strokeLinecap="round" />
-      <line x1="7.5" y1="11" x2="16.5" y2="11" stroke={color} strokeWidth="2" strokeLinecap="round" />
-      <line x1="6" y1="15" x2="18" y2="15" stroke={color} strokeWidth="2" strokeLinecap="round" />
-      <line x1="4.5" y1="19" x2="19.5" y2="19" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <path d="M12 3L4 21h16L12 3z" fill={color} opacity="0.15" />
+      <path d="M12 3L4 21h16L12 3z" stroke={color} strokeWidth="1.5" strokeLinejoin="round" fill="none" />
+      <line x1="6.7" y1="13" x2="17.3" y2="13" stroke={color} strokeWidth="1" />
+      <line x1="5.3" y1="17" x2="18.7" y2="17" stroke={color} strokeWidth="1" />
+      <line x1="8" y1="9" x2="16" y2="9" stroke={color} strokeWidth="1" />
     </svg>
   );
 }
