@@ -72,7 +72,7 @@ function EnhancedCalendarPicker({ value, onSave, onRemove, open, onOpenChange }:
           </span>
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0 max-h-[80vh] overflow-y-auto" align="end">
+      <PopoverContent className="w-auto p-0 " align="end" style={{ maxHeight: 'var(--radix-popover-content-available-height)', overflowY: 'auto' }}>
         <Calendar mode="single"
           selected={selected}
           onSelect={(d) => { if (d) setSelected(d); }}
@@ -115,7 +115,7 @@ function EnhancedCalendarPickerGeneric({ value, onSave, onRemove, open, onOpenCh
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
-      <PopoverContent className="w-auto p-0 max-h-[80vh] overflow-y-auto" align="start">
+      <PopoverContent className="w-auto p-0 " align="start" style={{ maxHeight: 'var(--radix-popover-content-available-height)', overflowY: 'auto' }}>
         <Calendar mode="single"
           selected={selected}
           onSelect={(d) => { if (d) setSelected(d); }}
