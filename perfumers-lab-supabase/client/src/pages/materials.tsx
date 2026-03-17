@@ -22,7 +22,15 @@ import { postJson, patchJson, deleteJson } from "@/lib/api";
 
 // ─── Pyramid SVG Icon ───────────────────────────────────────────
 // Filled pyramid with horizontal layer lines, like the reference screenshot
-function PyramidIcon({ size = 16, color = "currentColor", unknown = false, className = "" }: { size?: number; color?: string; unknown?: boolean; className?: string }) {
+function PyramidIcon({ size = 16, color = "currentColor", unknown = false, className = "", role = "top" }: { size?: number; color?: string; unknown?: boolean; className?: string; role?: string }) {
+  // Layer line positions: y coordinate and x extents within the triangle
+  const layers = [
+    { key: "top", y: 7, x1: 9.8, x2: 14.2 },
+    { key: "high", y: 10.5, x1: 8.1, x2: 15.9 },
+    { key: "middle", y: 14, x1: 6.3, x2: 17.7 },
+    { key: "bottom", y: 17.5, x1: 4.6, x2: 19.4 },
+    { key: "base", y: 20.5, x1: 3.2, x2: 20.8 },
+  ];
   if (unknown) {
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -33,11 +41,10 @@ function PyramidIcon({ size = 16, color = "currentColor", unknown = false, class
   }
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
-      <path d="M12 3L4 21h16L12 3z" fill={color} opacity="0.15" />
       <path d="M12 3L4 21h16L12 3z" stroke={color} strokeWidth="1.5" strokeLinejoin="round" fill="none" />
-      <line x1="6.7" y1="13" x2="17.3" y2="13" stroke={color} strokeWidth="1" />
-      <line x1="5.3" y1="17" x2="18.7" y2="17" stroke={color} strokeWidth="1" />
-      <line x1="8" y1="9" x2="16" y2="9" stroke={color} strokeWidth="1" />
+      {layers.map((l) => (
+        <line key={l.key} x1={l.x1} y1={l.y} x2={l.x2} y2={l.y} stroke={color} strokeWidth={l.key === role ? 2.5 : 0.8} opacity={l.key === role ? 1 : 0.35} />
+      ))}
     </svg>
   );
 }
@@ -679,7 +686,7 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
                             <PyramidIcon
                               size={18}
                               color={isActive ? "#fff" : "#888"}
-                              unknown={isUnknown}
+                              unknown={isUnknown}                 role={role}
                             />
                           </button>
                         </TooltipTrigger>
