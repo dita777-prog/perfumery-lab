@@ -1492,7 +1492,7 @@ function MaterialListItem({ m, selectedId, families, onSelect, onDeleteRequest }
             data-testid={`material-item-${m.id}`}
           >
             <span className="truncate flex-1">{m.name}</span>
-            <PyramidIcon size={15} color={isUnknown ? "#666" : mColor} unknown={isUnknown} className="shrink-0 opacity-70" />
+            <PyramidIcon size={15} color={isUnknown ? "#666" : mColor} unknown={isUnknown} role={m.pyramidRole || "top"} className="shrink-0 opacity-70" />
           </div>
           {showDelete && (
             <button
