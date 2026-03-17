@@ -375,6 +375,7 @@ function FormulaDetail({ formula }: { formula: any }) {
 function IngredientTable({ formulaId, enriched, ingredients, materials, dilutions, allFormulas, totalWeighed, totalNeat, totalPercent, onAddClick }: any) {
   const { toast } = useToast();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; ing: any } | null>(null);
+  const [changeMatDialog, setChangeMatDialog] = useState(null);
   const [editingGrams, setEditingGrams] = useState<string | null>(null);
   const [gramsValue, setGramsValue] = useState("");
   const [changingDilution, setChangingDilution] = useState<string | null>(null);
@@ -576,6 +577,16 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
       </div>
 
       {/* Context Menu */}
+      {changeMatDialog && (
+        <ChangeRawMaterialDialog
+          ing={changeMatDialog}
+          materials={materials}
+          allFormulas={allFormulas}
+          formulaId={formulaId}
+          onClose={() => setChangeMatDialog(null)}
+        />
+      )}
+
       {contextMenu && (
         <div
           className="fixed bg-popover border border-border rounded-lg shadow-lg py-1 z-50 min-w-[200px]"
@@ -583,6 +594,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
           onClick={e => e.stopPropagation()}
         >
           <ContextMenuItem label="Change dilution" onClick={() => { setChangingDilution(contextMenu.ing.id); setContextMenu(null); }} disabled={!contextMenu.ing.materialId} />
+              <ContextMenuItem label="Change raw material" onClick={() => { setChangeMatDialog(contextMenu.ing); setContextMenu(null); }} />
           <div className="h-px bg-border my-1" />
           <ContextMenuItem label="Highlight as too strong" onClick={() => handleHighlight(contextMenu.ing.id, "too_strong")} />
           <ContextMenuItem label="Highlight as too weak" onClick={() => handleHighlight(contextMenu.ing.id, "too_weak")} />
@@ -610,6 +622,51 @@ function ContextMenuItem({ label, onClick, disabled, destructive }: { label: str
 }
 
 // ─── Add Ingredient Dialog (simplified: material or formula) ────
+
+function ChangeRawMaterialDialog({ ing, materials, allFormulas, formulaId, onClose }) {
+  const [sourceType, setSourceType] = React.useState(ing.sourceType || "material");
+  const [sourceId, setSourceId] = React.useState("");
+  const [search, setSearch] = React.useState("");
+  const mutation = useMutation({
+    mutationFn: ({ id, data }) => patchJson(`/api/formula-ingredients/${id}`, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/formulas", formulaId, "ingredients"] }); onClose(); },
+  });
+  function handleSave() {
+    if (!sourceId) return;
+    mutation.mutate({ id: ing.id, data: { sourceType, materialId: sourceType === "material" ? sourceId : null, sourceFormulaId: sourceType === "formula" ? sourceId : null, dilutionId: null } });
+  }
+  const options = sourceType === "material" ? materials : allFormulas;
+  const filtered = options.filter(o => o.name.toLowerCase().includes(search.toLowerCase()));
+  return (
+    <Dialog open={true} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="bg-card border-border">
+        <DialogHeader><DialogTitle>Change Raw Material</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <Select value={sourceType} onValueChange={v => { setSourceType(v); setSourceId(""); setSearch(""); }}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="material">Raw Material</SelectItem>
+              <SelectItem value="formula">Formula / Accord</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="h-7 text-xs" autoFocus />
+          <div className="max-h-52 overflow-y-auto border border-border rounded">
+            {filtered.length === 0 && <p className="text-xs text-muted-foreground px-3 py-2">No results</p>}
+            {filtered.map(o => (
+              <button key={o.id}
+                className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-secondary transition-colors ${sourceId === o.id ? "bg-secondary font-medium" : "text-foreground"}`}
+                onClick={() => setSourceId(o.id)}>{o.name}</button>
+            ))}
+          </div>
+          <Button className="w-full" disabled={!sourceId || mutation.isPending} onClick={handleSave}>
+            {mutation.isPending ? "Saving..." : "Change material"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function AddIngredientDialog({ open, onOpenChange, formulaId, materials, allFormulas }: any) {
   const { toast } = useToast();
   const [sourceType, setSourceType] = useState("material");
