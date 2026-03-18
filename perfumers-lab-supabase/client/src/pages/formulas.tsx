@@ -555,7 +555,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
                   ) : (
                     <span
                       className="font-mono text-xs cursor-pointer hover:text-[hsl(183,70%,50%)] hover:underline decoration-dotted"
-                      onClick={() => { setEditingGrams(ing.id); setGramsValue(ing.gramsAsWeighed || "0"); }}
+                      onClick={() => { setEditingGrams(ing.id); setGramsValue(parseFloat(ing.gramsAsWeighed || "0").toFixed(3).replace(".", ",")); }}
                     >
                       {fmtGrams(ing.gramsAsWeighed)}
                     </span>
