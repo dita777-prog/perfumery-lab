@@ -161,6 +161,7 @@ function FormulaDetail({ formula }: { formula: any }) {
   const [notesText, setNotesText] = useState(formula.formulaNotes || "");
 
   const { data: ingredients = [] } = useQuery<any[]>({ queryKey: ["/api/formulas", formula.id, "ingredients"] });
+    const nameInputRef = useRef<HTMLInputElement>(null);
   const { data: materials = [] } = useQuery<any[]>({ queryKey: ["/api/materials"] });
   const { data: families = [] } = useQuery<any[]>({ queryKey: ["/api/olfactive-families"] });
   const { data: dilutions = [] } = useQuery<any[]>({ queryKey: ["/api/dilutions"] });
