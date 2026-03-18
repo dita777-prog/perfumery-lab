@@ -75,33 +75,33 @@ export default function FormulasPage() {
         <div className="flex-1 overflow-y-auto">
           {grouped.map(({ category, formulas: forms }) => (
             <div key={category.id}>
-              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground bg-secondary/50">
                 {category.name}
               </div>
               {forms.map((f: any) => (
                 <div key={f.id}
-                  className={`px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50 transition-colors
+                  className={`flex items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50 transition-colors border-b border-border/30
                     ${selectedId === f.id ? 'bg-[hsl(183,70%,36%)]/10 text-[hsl(183,70%,50%)]' : 'text-foreground/80'}`}
                   onClick={() => setSelectedId(f.id)}
                                   onContextMenu={(e) => { e.preventDefault(); setFormulaCtxMenu({ x: e.clientX, y: e.clientY, formula: f }); }}
                   data-testid={`formula-item-${f.id}`}
                 >
-                  <span className="truncate">{f.name}</span>
+                  <span className="truncate flex-1">{f.name}</span>{f.createdAt && <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">{new Date(f.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>}
                 </div>
               ))}
             </div>
           ))}
           {ungrouped.length > 0 && (
             <div>
-              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Uncategorized</div>
+              <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground bg-secondary/50">Uncategorized</div>
               {ungrouped.map((f: any) => (
                 <div key={f.id}
-                  className={`px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50
+                  className={`flex items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50 border-b border-border/30
                     ${selectedId === f.id ? 'bg-[hsl(183,70%,36%)]/10' : ''}`}
                   onClick={() => setSelectedId(f.id)}
                                 onContextMenu={(e) => { e.preventDefault(); setFormulaCtxMenu({ x: e.clientX, y: e.clientY, formula: f }); }}
                 >
-                  {f.name}
+                  <span className="truncate flex-1">{f.name}</span>{f.createdAt && <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">{new Date(f.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>}
                 </div>
               ))}
             </div>
