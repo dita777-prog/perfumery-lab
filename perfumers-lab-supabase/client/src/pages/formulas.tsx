@@ -155,6 +155,8 @@ function FormulaDetail({ formula }: { formula: any }) {
   const [showScale, setShowScale] = useState(false);
   const [showDupDialog, setShowDupDialog] = useState(false);
   const [showAddIngredient, setShowAddIngredient] = useState(false);
+    const [editingName, setEditingName] = useState(false);
+    const [nameValue, setNameValue] = useState(formula.name);
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesText, setNotesText] = useState(formula.formulaNotes || "");
 
@@ -166,7 +168,7 @@ function FormulaDetail({ formula }: { formula: any }) {
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/formula-categories"] });
 
   // Reset notes when formula changes
-  useEffect(() => { setNotesText(formula.formulaNotes || ""); setEditingNotes(false); }, [formula.id]);
+  useEffect(() => { setNotesText(formula.formulaNotes || ""); setEditingNotes(false); setNameValue(formula.name); setEditingName(false); }, [formula.id]);
 
   const enriched = recalcPercents(ingredients);
   const totalWeighed = ingredients.reduce((s: number, i: any) => s + parseFloat(i.gramsAsWeighed || "0"), 0);
@@ -207,6 +209,11 @@ function FormulaDetail({ formula }: { formula: any }) {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/formulas"] }); setShowDupDialog(false); toast({ title: "Formula duplicated" }); },
   });
 
+
+    const renameMut = useMutation({
+          mutationFn: (name: string) => patchJson(`/api/formulas/${formula.id}`, { name }),
+          onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/formulas"] }); setEditingName(false); toast({ title: "Formula renamed" }); },
+        });
   const saveNotesMut = useMutation({
     mutationFn: (notes: string) => patchJson(`/api/formulas/${formula.id}`, { formulaNotes: notes || null }),
     onSuccess: () => {
@@ -220,7 +227,7 @@ function FormulaDetail({ formula }: { formula: any }) {
     <div className="p-6 max-w-4xl">
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h1 className="text-xl font-semibold" data-testid="text-formula-name">{formula.name}</h1>
+                    {editingName ? (<input ref={nameInputRef} className="text-xl font-semibold bg-transparent border-b-2 border-[hsl(183,70%,50%)] outline-none w-full" value={nameValue} onChange={e => setNameValue(e.target.value)} onBlur={() => { const t = nameValue.trim(); if (t && t !== formula.name) renameMut.mutate(t); else setEditingName(false); }} onKeyDown={e => { if (e.key === "Enter") { e.currentTarget.blur(); } if (e.key === "Escape") { setNameValue(formula.name); setEditingName(false); } }} autoFocus />) : (<h1 className="text-xl font-semibold cursor-pointer hover:text-[hsl(183,70%,50%)] transition-colors group" data-testid="text-formula-name" onClick={() => setEditingName(true)} title="Click to rename">{formula.name} <Pencil size={14} className="inline ml-1 opacity-0 group-hover:opacity-100 transition-opacity" /></h1>)}
           {/* Category dropdown label */}
           <Popover open={catOpen} onOpenChange={(v) => { setCatOpen(v); if (!v) { setNewCatInline(false); setNewCatInlineName(""); } }}>
             <PopoverTrigger asChild>
