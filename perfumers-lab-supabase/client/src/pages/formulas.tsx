@@ -22,6 +22,7 @@ function parseEuroInput(val: string): number {
 
 export default function FormulasPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [viewingMaterialId, setViewingMaterialId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showCatManager, setShowCatManager] = useState(false);
   const [filter, setFilter] = useState("");
@@ -82,7 +83,7 @@ export default function FormulasPage() {
                 <div key={f.id}
                   className={`flex items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50 transition-colors border-b border-border/30
                     ${selectedId === f.id ? 'bg-[hsl(183,70%,36%)]/10 text-[hsl(183,70%,50%)]' : 'text-foreground/80'}`}
-                  onClick={() => setSelectedId(f.id)}
+                  onClick={() => { setSelectedId(f.id); setViewingMaterialId(null); }}
                                   onContextMenu={(e) => { e.preventDefault(); setFormulaCtxMenu({ x: e.clientX, y: e.clientY, formula: f }); }}
                   data-testid={`formula-item-${f.id}`}
                 >
@@ -98,7 +99,7 @@ export default function FormulasPage() {
                 <div key={f.id}
                   className={`flex items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50 border-b border-border/30
                     ${selectedId === f.id ? 'bg-[hsl(183,70%,36%)]/10' : ''}`}
-                  onClick={() => setSelectedId(f.id)}
+                  onClick={() => { setSelectedId(f.id); setViewingMaterialId(null); }}
                                 onContextMenu={(e) => { e.preventDefault(); setFormulaCtxMenu({ x: e.clientX, y: e.clientY, formula: f }); }}
                 >
                   <span className="truncate flex-1">{f.name}</span>{f.createdAt && <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">{new Date(f.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>}
@@ -110,7 +111,7 @@ export default function FormulasPage() {
       </div>
 
       <div className={`flex-1 overflow-y-auto ${selectedId ? '' : 'hidden md:block'}`}>
-        {selected ? <><button onClick={() => setSelectedId(null)} className="md:hidden flex items-center gap-1 pl-14 md:pl-3 pr-3 pt-3 text-sm text-muted-foreground"><ArrowLeft size={16} /> Back</button><FormulaDetail formula={selected} onBack={() => setSelectedId(null)} /></> : (
+        {viewingMaterialId ? <MaterialCardView materialId={viewingMaterialId} onBack={() => setViewingMaterialId(null)} /> : selected ? <><button onClick={() => setSelectedId(null)} className="md:hidden flex items-center gap-1 pl-14 md:pl-3 pr-3 pt-3 text-sm text-muted-foreground"><ArrowLeft size={16} /> Back</button><FormulaDetail formula={selected} onBack={() => setSelectedId(null)} onMaterialClick={(id: string) => setViewingMaterialId(id)} /></> : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">Select a formula</div>
         )}
               </div>
@@ -150,7 +151,7 @@ export default function FormulasPage() {
 }
 
 // ─── Formula Detail ─────────────────────────────────────────────
-function FormulaDetail({ formula, onBack }: { formula: any; onBack?: () => void }) {
+function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onBack?: () => void; onMaterialClick?: (id: string) => void }) {
   const { toast } = useToast();
   const [showScale, setShowScale] = useState(false);
   const [showDupDialog, setShowDupDialog] = useState(false);
@@ -380,7 +381,7 @@ function FormulaDetail({ formula, onBack }: { formula: any; onBack?: () => void 
 }
 
 // ─── Ingredient Table (main working surface) ────────────────────
-function IngredientTable({ formulaId, enriched, ingredients, materials, dilutions, allFormulas, totalWeighed, totalNeat, totalPercent, onAddClick }: any) {
+function IngredientTable({ formulaId, enriched, ingredients, materials, dilutions, allFormulas, totalWeighed, totalNeat, totalPercent, onAddClick, onMaterialClick }: any) {
   const { toast } = useToast();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; ing: any } | null>(null);
   const [changeMatDialog, setChangeMatDialog] = useState(null);
@@ -501,7 +502,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
               <tr key={ing.id} className={`border-b border-border/50 hover:bg-secondary/30 ${hlClass}`}>
                 <td className="p-2 pl-3">
                   <span
-                    className={`cursor-context-menu ${ing.dilutionId ? "text-[hsl(183,70%,50%)]" : ""}`}
+                    className={`cursor-pointer hover:underline ${ing.dilutionId ? "text-[hsl(183,70%,50%)]" : ""}`} onClick={() => ing.materialId && onMaterialClick?.(ing.materialId)}
                     onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, ing }); }}
                   >
                     {getIngredientName(ing)}
@@ -1165,5 +1166,55 @@ function CategoryManagerDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+// ─── Material Card View (opened from ingredient click) ────────
+function MaterialCardView({ materialId, onBack }: { materialId: string; onBack: () => void }) {
+  const { data: materials = [] } = useQuery({ queryKey: ["/api/materials"] });
+  const { data: families = [] } = useQuery({ queryKey: ["/api/olfactive-families"] });
+  const { data: dilutions = [] } = useQuery({ queryKey: ["/api/dilutions"] });
+  const mat = materials.find((m: any) => m.id === materialId);
+  if (!mat) return <div className="p-6 text-muted-foreground">Loading material...</div>;
+  const family = families.find((f: any) => f.id === mat.familyId);
+  const matDilutions = dilutions.filter((d: any) => d.sourceMaterialId === mat.id);
+  return (
+    <div className="p-4 space-y-4 overflow-y-auto">
+      <button onClick={onBack} className="md:hidden flex items-center gap-1 pl-14 md:pl-3 text-sm text-muted-foreground mb-2">
+        <ArrowLeft size={16} /> Back
+      </button>
+      <button onClick={onBack} className="hidden md:flex items-center gap-1 text-sm text-muted-foreground mb-2">
+        <ArrowLeft size={16} /> Back to formula
+      </button>
+      <h2 className="text-xl font-semibold">{mat.name}</h2>
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        {mat.casNumber && <div><span className="text-muted-foreground">CAS:</span> {mat.casNumber}</div>}
+        {family && <div><span className="text-muted-foreground">Family:</span> {family.name}</div>}
+        {mat.supplier && <div><span className="text-muted-foreground">Supplier:</span> {mat.supplier}</div>}
+        {mat.costPerGram && <div><span className="text-muted-foreground">Cost/g:</span> {fmtNum(mat.costPerGram)}</div>}
+        {mat.inventoryGrams && <div><span className="text-muted-foreground">Inventory:</span> {fmtGrams(mat.inventoryGrams)}</div>}
+        {mat.ifraMaxPercent && <div><span className="text-muted-foreground">IFRA max:</span> {fmtPercent(mat.ifraMaxPercent)}</div>}
+        {mat.pyramidPlacement && <div><span className="text-muted-foreground">Pyramid:</span> {mat.pyramidPlacement}</div>}
+      </div>
+      {matDilutions.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold mb-1">Dilutions</h3>
+          <div className="space-y-1">
+            {matDilutions.map((d: any) => (
+              <div key={d.id} className="text-xs text-muted-foreground">
+                {fmtNum(d.dilutionPercent)}%{d.solventName ? ` in ${d.solventName}` : ""}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {mat.description && (
+        <div>
+          <h3 className="text-sm font-semibold mb-1">Description</h3>
+          <p className="text-sm whitespace-pre-wrap">{mat.description}</p>
+        </div>
+      )}
+    </div>
   );
 }
