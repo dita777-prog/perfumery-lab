@@ -60,7 +60,7 @@ export default function FormulasPage() {
   return (
     <div className="panel-layout h-full">
             <div className={`border-r border-border flex flex-col h-full overflow-hidden ${selectedId ? 'hidden md:flex' : 'flex'}`}>
-        <div className="p-3 border-b border-border flex items-center gap-2">
+        <div className="py-3 pr-3 pl-14 md:pl-3 border-b border-border flex items-center gap-2">
           <h2 className="text-sm font-semibold flex-1">Formulas</h2>
           <Button size="sm" variant="ghost" onClick={() => setShowCatManager(true)} data-testid="button-category-manager" title="Category Manager">
             <Tag size={14} />
@@ -110,7 +110,7 @@ export default function FormulasPage() {
       </div>
 
       <div className={`flex-1 overflow-y-auto ${selectedId ? '' : 'hidden md:block'}`}>
-        {selected ? <><button onClick={() => setSelectedId(null)} className="md:hidden flex items-center gap-1 px-3 pt-3 text-sm text-muted-foreground"><ArrowLeft size={16} /> Back</button><FormulaDetail formula={selected} onBack={() => setSelectedId(null)} /></> : (
+        {selected ? <><button onClick={() => setSelectedId(null)} className="md:hidden flex items-center gap-1 pl-14 md:pl-3 pr-3 pt-3 text-sm text-muted-foreground"><ArrowLeft size={16} /> Back</button><FormulaDetail formula={selected} onBack={() => setSelectedId(null)} /></> : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">Select a formula</div>
         )}
               </div>
