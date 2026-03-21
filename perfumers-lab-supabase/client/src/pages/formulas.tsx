@@ -542,13 +542,9 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
                       type="text"
                       inputMode="decimal"
                       autoFocus
-                      ref={el => el?.select()}
+                      ref={el => { if (el && !el.dataset.selected) { el.dataset.selected = "1"; el.select(); } }}
                       value={gramsValue}
-                      onChange={e => {
-                        // Allow digits, comma, dot, minus
-                        const v = e.target.value.replace(/[^0-9.,\-]/g, "");
-                        setGramsValue(v);
-                      }}
+                                    onChange={e => setGramsValue(e.target.value)}              
                       onBlur={() => handleGramsSave(ing.id)}
                       onKeyDown={e => { if (e.key === "Enter") handleGramsSave(ing.id); if (e.key === "Escape") setEditingGrams(null); }}
                     />
