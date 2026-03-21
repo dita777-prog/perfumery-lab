@@ -73,7 +73,7 @@ async function supabaseQueryFromKey(queryKey: readonly unknown[]): Promise<any> 
       .from("formula_ingredients")
       .select("*")
       .eq("formula_id", segment1)
-      .order("sort_order", { ascending: true });
+      .order("created_at", { ascending: true });
     throwSupabaseError(error, "formula ingredients");
     return toCamelCase(data);
   }
@@ -87,7 +87,7 @@ async function supabaseQueryFromKey(queryKey: readonly unknown[]): Promise<any> 
     "/api/material-sources": { table: "material_sources", order: ["created_at", { ascending: false }] },
     "/api/dilutions": { table: "material_dilutions", order: ["created_at", { ascending: true }] },
     "/api/formulas": { table: "formulas", order: ["updated_at", { ascending: false }] },
-    "/api/formula-ingredients": { table: "formula_ingredients", order: ["sort_order", { ascending: true }] },
+    "/api/formula-ingredients": { table: "formula_ingredients", order: ["created_at", { ascending: true }] },
     "/api/tests": { table: "tests", order: ["test_date", { ascending: false }] },
     "/api/decisions": { table: "decisions", order: ["date", { ascending: false }] },
     "/api/stock-movements": { table: "stock_movements", order: ["date", { ascending: false }] },
