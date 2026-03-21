@@ -319,7 +319,7 @@ function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onB
         totalWeighed={totalWeighed}
         totalNeat={totalNeat}
         totalPercent={totalPercent}
-        onAddClick={() => setShowAddIngredient(true)}
+        onAddClick={() => setShowAddIngredient(true)}         onMaterialClick={onMaterialClick}
       />
 
       {/* Pyramid */}
