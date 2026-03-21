@@ -110,7 +110,7 @@ export default function FormulasPage() {
       </div>
 
       <div className={`flex-1 overflow-y-auto ${selectedId ? '' : 'hidden md:block'}`}>
-        {{selected ? <><button onClick={() => setSelectedId(null)} className="md:hidden flex items-center gap-1 px-3 pt-3 text-sm text-muted-foreground"><ArrowLeft size={16} /> Back</button><FormulaDetail formula={selected} onBack={() => setSelectedId(null)} /></> : (
+        {selected ? <><button onClick={() => setSelectedId(null)} className="md:hidden flex items-center gap-1 px-3 pt-3 text-sm text-muted-foreground"><ArrowLeft size={16} /> Back</button><FormulaDetail formula={selected} onBack={() => setSelectedId(null)} /></> : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">Select a formula</div>
         )}
             
