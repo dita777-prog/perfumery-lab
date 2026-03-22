@@ -174,7 +174,7 @@ function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onB
 
   const enriched = recalcPercents(ingredients);
   const totalWeighed = ingredients.reduce((s: number, i: any) => s + parseFloat(i.gramsAsWeighed || "0"), 0);
-  const totalNeat = ingredients.reduce((s: number, i: any) => s + parseFloat(i.neatGrams || i.gramsAsWeighed || "0"), 0);
+  const totalNeat = ingredients.reduce((s: number, i: any) => s + parseFloat((i.neatGrams != null ? i.neatGrams : i.gramsAsWeighed) || "0"), 0);
   const totalPercent = enriched.reduce((s: number, i: any) => s + parseFloat(i.percentInFormula || "0"), 0);
   const pyramid = calcPyramidBreakdown(ingredients, materials);
 
@@ -438,7 +438,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
     }
     updateIngMut.mutate({
       id: ingId,
-      data: { gramsAsWeighed: String(g), neatGrams: String((g * neatMult).toFixed(3)) }
+      data: { gramsAsWeighed: String(g), neatGrams: String(g * neatMult) }
     });
     setEditingGrams(null);
   }
@@ -458,7 +458,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
       id: ingId,
       data: {
         dilutionId: dilutionId || null,
-        neatGrams: String((g * neatMult).toFixed(3)),
+        neatGrams: String(g * neatMult),
         sourceType,
       }
     });
