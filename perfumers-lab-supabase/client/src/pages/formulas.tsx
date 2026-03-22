@@ -76,7 +76,7 @@ export default function FormulasPage() {
         <div className="flex-1 overflow-y-auto">
           {grouped.map(({ category, formulas: forms }) => (
             <div key={category.id}>
-              <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground bg-secondary/50">
+              <div className="px-3 py-2 text-[13px] font-semibold uppercase tracking-wider text-blue-400 bg-secondary/50">
                 {category.name}
               </div>
               {forms.map((f: any) => (
@@ -94,7 +94,7 @@ export default function FormulasPage() {
           ))}
           {ungrouped.length > 0 && (
             <div>
-              <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground bg-secondary/50">Uncategorized</div>
+              <div className="px-3 py-2 text-[13px] font-semibold uppercase tracking-wider text-blue-400 bg-secondary/50">Uncategorized</div>
               {ungrouped.map((f: any) => (
                 <div key={f.id}
                   className={`flex items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50 border-b border-border/30
