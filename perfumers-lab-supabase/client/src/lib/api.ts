@@ -128,10 +128,12 @@ export async function deleteJson(url: string): Promise<void> {
     await supabase.from("decisions").update({ related_formula_id: null }).eq("related_formula_id", id);
     await supabase.from("stock_movements").update({ related_formula_id: null }).eq("related_formula_id", id);
     await supabase.from("formula_ingredients").update({ source_formula_id: null }).eq("source_formula_id", id);
+        await supabase.from("formulas").update({ parent_formula_id: null }).eq("parent_formula_id", id);
   }
   const { error } = await supabase.from(table).delete().eq("id", id);
   if (error) throw new Error(`Delete ${table}: ${error.message}`);
 }
+  
 
 // ============ Special: Reorder ============
 async function handleReorder(basePath: string, body: { ids: string[] }): Promise<any> {
