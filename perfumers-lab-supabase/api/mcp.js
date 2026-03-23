@@ -133,6 +133,11 @@ module.exports = async function handler(req, res) {
 
   const body = req.body;
 
+  // Handle notifications (no response needed, just 200 OK)
+  if (body.method && body.method.startsWith('notifications/')) {
+    return res.status(200).end();
+  }
+
   // MCP: initialize
   if (body.method === 'initialize') {
     return res.status(200).json({
@@ -176,5 +181,10 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  return res.status(400).json({ error: 'Unknown method' });
+  // Unknown method — return empty success
+  return res.status(200).json({
+    jsonrpc: '2.0',
+    id: body.id || null,
+    result: {}
+  });
 };
