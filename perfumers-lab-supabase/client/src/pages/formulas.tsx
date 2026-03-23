@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Plus, Copy, Scale, AlertTriangle, Pencil, Tag, Trash2, ChevronDown, ArrowLeft, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -721,8 +721,21 @@ function ChangeRawMaterialDialog({ ing, materials, allFormulas, formulaId, onClo
     if (!sourceId) return;
     mutation.mutate({ id: ing.id, data: { sourceType, materialId: sourceType === "material" ? sourceId : null, sourceFormulaId: sourceType === "formula" ? sourceId : null, dilutionId: null } });
   }
+    const { data: families = [] } = useQuery({ queryKey: ["/api/olfactive-families"] });
   const options = sourceType === "material" ? materials : allFormulas;
-  const filtered = options.filter(o => o.name.toLowerCase().includes(search.toLowerCase()));
+    const grouped = useMemo(() => {
+    const q = search.toLowerCase();
+    const list = options.filter((o: any) => o.name.toLowerCase().includes(q));
+    if (sourceType !== "material") return [{ label: "Formulas", items: list }];
+    const byFamily: Record<string, any[]> = {};
+    for (const mat of list) {
+      const fam = families.find((f: any) => f.id === mat.familyId);
+      const label = fam?.name || "Other";
+      if (!byFamily[label]) byFamily[label] = [];
+      byFamily[label].push(mat);
+    }
+    return Object.entries(byFamily).sort(([a], [b]) => a.localeCompare(b)).map(([label, items]) => ({ label, items }));
+  }, [options, families, search, sourceType]);
   return (
     <Dialog open={true} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="bg-card border-border">
@@ -737,12 +750,15 @@ function ChangeRawMaterialDialog({ ing, materials, allFormulas, formulaId, onClo
           </Select>
           <Input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="h-7 text-xs" autoFocus />
           <div className="max-h-52 overflow-y-auto border border-border rounded">
-            {filtered.length === 0 && <p className="text-xs text-muted-foreground px-3 py-2">No results</p>}
-            {filtered.map(o => (
-              <button key={o.id}
-                className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-secondary transition-colors ${sourceId === o.id ? "bg-secondary font-medium" : "text-foreground"}`}
-                onClick={() => setSourceId(o.id)}>{o.name}</button>
-            ))}
+                          {grouped.length === 0 && <p className="text-xs text-muted-foreground px-3 py-2">No results</p>}
+              {grouped.map(({ label, items }) => (
+                <div key={label}>
+                  <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide bg-secondary/50 sticky top-0">{label}</div>
+                  {items.map((o: any) => (
+                    <button key={o.id} className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-secondary transition-colors ${sourceId === o.id ? "bg-secondary font-medium" : "text-foreground"}`} onClick={() => setSourceId(o.id)}>{o.name}</button>
+                  ))}
+                </div>
+              ))}
           </div>
           <Button className="w-full" disabled={!sourceId || mutation.isPending} onClick={handleSave}>
             {mutation.isPending ? "Saving..." : "Change material"}
@@ -756,9 +772,7 @@ function ChangeRawMaterialDialog({ ing, materials, allFormulas, formulaId, onClo
 function AddIngredientDialog({ open, onOpenChange, formulaId, materials, allFormulas }: any) {
   const { toast } = useToast();
   const [sourceType, setSourceType] = useState("material");
-  const [sourceId, setSourceId] = useState("");
-
-  const mutation = useMutation({
+  const [sourceId, setSourceId] = useState("");   const [search, setSearch] = useState("");    const mutation = useMutation({
     mutationFn: (data: any) => postJson("/api/formula-ingredients", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/formulas", formulaId, "ingredients"] });
@@ -768,9 +782,20 @@ function AddIngredientDialog({ open, onOpenChange, formulaId, materials, allForm
     },
   });
 
-  const options = sourceType === "material" ? materials : allFormulas;
-
-  function handleAdd() {
+    const { data: families = [] } = useQuery({ queryKey: ["/api/olfactive-families"] });
+    const grouped = useMemo(() => {
+    const q = search.toLowerCase();
+    const list = options.filter((o: any) => o.name.toLowerCase().includes(q));
+    if (sourceType !== "material") return [{ label: "Formulas", items: list }];
+    const byFamily: Record<string, any[]> = {};
+    for (const mat of list) {
+      const fam = families.find((f: any) => f.id === mat.familyId);
+      const label = fam?.name || "Other";
+      if (!byFamily[label]) byFamily[label] = [];
+      byFamily[label].push(mat);
+    }
+    return Object.entries(byFamily).sort(([a], [b]) => a.localeCompare(b)).map(([label, items]) => ({ label, items }));
+  }, [options, families, search, sourceType]);=> o.name.toLowerCase().includes(search.toLowerCase()));    function handleAdd() {
     mutation.mutate({
       formulaId,
       sourceType,
@@ -794,12 +819,17 @@ function AddIngredientDialog({ open, onOpenChange, formulaId, materials, allForm
               <SelectItem value="formula">Formula / Accord</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={sourceId} onValueChange={setSourceId}>
-            <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
-            <SelectContent>
-              {options.map((o: any) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <Input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="h-7 text-xs" /><div className="max-h-52 overflow-y-auto border border-border rounded">
+              {grouped.length === 0 && <p className="text-xs text-muted-foreground px-3 py-2">No results</p>}
+              {grouped.map(({ label, items }) => (
+                <div key={label}>
+                  <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide bg-secondary/50 sticky top-0">{label}</div>
+                  {items.map((o: any) => (
+                    <button key={o.id} className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-secondary transition-colors ${sourceId === o.id ? "bg-secondary font-medium" : "text-foreground"}`} onClick={() => setSourceId(o.id)}>{o.name}</button>
+                  ))}
+                </div>
+              ))}
+            </div>        
           <p className="text-[10px] text-muted-foreground">Dilution and grams can be set in the formula table after adding.</p>
           <Button className="w-full" disabled={!sourceId || mutation.isPending} onClick={handleAdd} data-testid="button-add-ingredient-confirm">
             Add
