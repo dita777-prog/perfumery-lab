@@ -37,6 +37,10 @@ export default function FormulasPage() {
                   setSelectedId(null);
                   toast({ title: "Formula deleted" });
                 },
+          onError: (err: any) => {
+      setConfirmDeleteId(null);
+      toast({ title: "Failed to delete formula", description: err?.message || "Unknown error", variant: "destructive" });
+    },
         });
     useEffect(() => {
           const handler = () => setFormulaCtxMenu(null);
