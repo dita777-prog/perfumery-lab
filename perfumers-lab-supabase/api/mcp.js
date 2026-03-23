@@ -1,6 +1,5 @@
 // Perfumery Lab — MCP server endpoint for Perplexity
 // Vercel Serverless Function: /api/mcp
-// Compatible with Perplexity MCP connector (SSE + JSON-RPC)
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -96,7 +95,7 @@ async function callTool(name, args) {
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Mcp-Session-Id');
 }
 
 async function handleJsonRpc(body) {
@@ -141,22 +140,18 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method === 'DELETE') return res.status(200).end();
 
-  // GET — SSE stream for MCP discovery (required by Perplexity)
+  // GET — SSE stream, send 'endpoint' event so Perplexity knows where to POST
   if (req.method === 'GET') {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
+    const host = req.headers['x-forwarded-host'] || req.headers.host || 'perfumery-lab.vercel.app';
+    const proto = req.headers['x-forwarded-proto'] || 'https';
+    const postUrl = `${proto}://${host}/api/mcp`;
 
-    const initMessage = {
-      jsonrpc: '2.0',
-      method: 'initialize',
-      params: {
-        protocolVersion: '2024-11-05',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'perfumery-lab', version: '1.0.0' }
-      }
-    };
-    res.write(`data: ${JSON.stringify(initMessage)}\n\n`);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    res.write(`event: endpoint\ndata: ${JSON.stringify({ uri: postUrl })}\n\n`);
     return res.end();
   }
 
