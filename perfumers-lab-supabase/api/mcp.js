@@ -1,4 +1,4 @@
-// Perfumery Lab — MCP server endpoint for Perplexity
+// Perfumery Lab — MCP Streamable HTTP server for Perplexity
 // Vercel Serverless Function: /api/mcp
 
 import { createClient } from '@supabase/supabase-js';
@@ -7,6 +7,9 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
+
+const SERVER_INFO = { name: 'perfumery-lab', version: '1.0.0' };
+const PROTOCOL_VERSION = '2024-11-05';
 
 const TOOLS = [
   {
@@ -92,93 +95,109 @@ async function callTool(name, args) {
   }
 }
 
-function setCorsHeaders(res) {
+function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Mcp-Session-Id');
 }
 
-async function handleJsonRpc(body) {
-  if (!body || !body.method) return null;
-  if (body.method.startsWith('notifications/')) return null;
+function handleRequest(msg) {
+  if (!msg || typeof msg !== 'object') return null;
+  if (!msg.method) return null;
+  if (msg.method.startsWith('notifications/')) return null;
 
-  if (body.method === 'initialize') {
+  const id = msg.id ?? null;
+
+  if (msg.method === 'initialize') {
     return {
-      jsonrpc: '2.0',
-      id: body.id,
+      jsonrpc: '2.0', id,
       result: {
-        protocolVersion: '2024-11-05',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'perfumery-lab', version: '1.0.0' }
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: SERVER_INFO
       }
     };
   }
 
-  if (body.method === 'tools/list') {
-    return { jsonrpc: '2.0', id: body.id, result: { tools: TOOLS } };
+  if (msg.method === 'ping') {
+    return { jsonrpc: '2.0', id, result: {} };
   }
 
-  if (body.method === 'tools/call') {
-    const { name, arguments: args } = body.params;
-    try {
-      const result = await callTool(name, args || {});
-      return {
-        jsonrpc: '2.0', id: body.id,
-        result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-      };
-    } catch (err) {
-      return { jsonrpc: '2.0', id: body.id, error: { code: -32603, message: err.message } };
-    }
+  if (msg.method === 'tools/list') {
+    return { jsonrpc: '2.0', id, result: { tools: TOOLS } };
   }
 
-  return { jsonrpc: '2.0', id: body.id || null, result: {} };
+  if (msg.method === 'tools/call') {
+    // Handled async separately
+    return '__async__';
+  }
+
+  if (id !== null) {
+    return { jsonrpc: '2.0', id, result: {} };
+  }
+  return null;
 }
 
 export default async function handler(req, res) {
-  setCorsHeaders(res);
+  setCors(res);
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method === 'DELETE') return res.status(200).end();
 
-  // GET — SSE stream, send 'endpoint' event so Perplexity knows where to POST
   if (req.method === 'GET') {
-    const host = req.headers['x-forwarded-host'] || req.headers.host || 'perfumery-lab.vercel.app';
-    const proto = req.headers['x-forwarded-proto'] || 'https';
-    const postUrl = `${proto}://${host}/api/mcp`;
-
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-
-    res.write(`event: endpoint\ndata: ${JSON.stringify({ uri: postUrl })}\n\n`);
-    return res.end();
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(200).json({
+      name: SERVER_INFO.name,
+      version: SERVER_INFO.version,
+      protocolVersion: PROTOCOL_VERSION,
+      capabilities: { tools: {} }
+    });
   }
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
+  }
+  if (!body) return res.status(400).json({ error: 'Empty body' });
+
   res.setHeader('Content-Type', 'application/json');
 
-  let body;
-  try {
-    body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-  } catch {
-    return res.status(400).json({ error: 'Invalid JSON' });
-  }
-
-  if (Array.isArray(body)) {
-    const responses = [];
-    for (const msg of body) {
-      const response = await handleJsonRpc(msg);
-      if (response !== null) responses.push(response);
+  // Single message
+  if (!Array.isArray(body)) {
+    const sync = handleRequest(body);
+    if (sync === null) return res.status(202).end();
+    if (sync !== '__async__') return res.status(200).json(sync);
+    // async tool call
+    const { name, arguments: args } = body.params || {};
+    try {
+      const result = await callTool(name, args || {});
+      return res.status(200).json({
+        jsonrpc: '2.0', id: body.id,
+        result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      });
+    } catch (err) {
+      return res.status(200).json({ jsonrpc: '2.0', id: body.id, error: { code: -32603, message: err.message } });
     }
-    if (responses.length === 0) return res.status(200).end();
-    return res.status(200).json(responses);
   }
 
-  const response = await handleJsonRpc(body);
-  if (response === null) return res.status(200).end();
-  return res.status(200).json(response);
+  // Batch
+  const responses = [];
+  for (const msg of body) {
+    const sync = handleRequest(msg);
+    if (sync === null) continue;
+    if (sync !== '__async__') { responses.push(sync); continue; }
+    const { name, arguments: args } = msg.params || {};
+    try {
+      const result = await callTool(name, args || {});
+      responses.push({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } });
+    } catch (err) {
+      responses.push({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: err.message } });
+    }
+  }
+  if (responses.length === 0) return res.status(202).end();
+  return res.status(200).json(responses);
 }
