@@ -178,6 +178,55 @@ function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onB
   const totalPercent = enriched.reduce((s: number, i: any) => s + parseFloat(i.percentInFormula || "0"), 0);
   const pyramid = calcPyramidBreakdown(ingredients, materials);
 
+    // ─── Exchange Solvent Calculation ───────────────────────────
+  // For each solvent ingredient (material with treatAsSolvent), calculate how much
+  // of that solvent is already contributed by dilutions of other ingredients.
+  const exchangeSolvent = (() => {
+    // Find all ingredients that ARE solvents (their material has treatAsSolvent=true)
+    const solventIngredients = ingredients.filter((ing: any) => {
+      if (!ing.materialId) return false;
+      const mat = materials.find((m: any) => m.id === ing.materialId);
+      return mat?.treatAsSolvent === true;
+    });
+    if (solventIngredients.length === 0) return [];
+
+    // For each solvent ingredient, find how much of that solvent comes from dilutions
+    const result: { solventName: string; solventMaterialId: string; weighedGrams: number; contributedBySolvent: number; adjustedGrams: number }[] = [];
+
+    for (const solventIng of solventIngredients) {
+      const solventMat = materials.find((m: any) => m.id === solventIng.materialId);
+      const solventName = solventMat?.name || "Unknown";
+      const weighedGrams = parseFloat(solventIng.gramsAsWeighed || "0");
+
+      // Sum solvent contributed by dilutions of other ingredients
+      let contributedBySolvent = 0;
+      for (const ing of ingredients) {
+        if (ing.id === solventIng.id) continue; // skip the solvent itself
+        if (!ing.dilutionId) continue; // only diluted ingredients contribute solvent
+        const dil = dilutions.find((d: any) => d.id === ing.dilutionId);
+        if (!dil) continue;
+        // Check if this dilution's solvent matches our solvent material
+        const dilSolventMatches = dil.solventMaterialId === solventIng.materialId;
+        // Fallback: match by name if solventMaterialId is not set
+        const dilSolventNameMatches = !dil.solventMaterialId && dil.solventName && solventName.toLowerCase().includes(dil.solventName.toLowerCase());
+        if (!dilSolventMatches && !dilSolventNameMatches) continue;
+        // Solvent contributed = weighed grams * (1 - dilutionPercent/100)
+        const dilPercent = parseFloat(dil.dilutionPercent || "0");
+        const ingWeighed = parseFloat(ing.gramsAsWeighed || "0");
+        contributedBySolvent += ingWeighed * (1 - dilPercent / 100);
+      }
+
+      result.push({
+        solventName,
+        solventMaterialId: solventIng.materialId,
+        weighedGrams,
+        contributedBySolvent: Math.round(contributedBySolvent * 1000) / 1000,
+        adjustedGrams: Math.round(Math.max(0, weighedGrams - contributedBySolvent) * 1000) / 1000,
+      });
+    }
+    return result;
+  })();
+
   const warnings: string[] = [];
   if (Math.abs(totalPercent - 100) > 2 && ingredients.length > 0) {
     warnings.push(`Total is ${fmtNum(totalPercent)}% (not ~100%)`);
@@ -338,6 +387,34 @@ function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onB
         </div>
       </div>
 
+          {/* Exchange Solvent */}
+    {exchangeSolvent.length > 0 && (
+      <div className="mb-6">
+        <div className="bg-card rounded-lg border border-border p-4">
+          <h3 className="text-xs font-semibold text-muted-foreground mb-3">Exchange Solvent</h3>
+          <p className="text-[10px] text-muted-foreground mb-3">Solvent already contributed by dilutions of other ingredients. "You need to add" = your weighed amount minus what dilutions already bring.</p>
+          {exchangeSolvent.map((es: any) => (
+            <div key={es.solventMaterialId} className="mb-3 last:mb-0">
+              <div className="text-sm font-medium mb-1.5">{es.solventName}</div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <span className="text-muted-foreground">Weighed: </span>
+                  <span className="font-mono">{fmtGrams(es.weighedGrams)}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">From dilutions: </span>
+                  <span className="font-mono text-[hsl(183,70%,50%)]">{fmtGrams(es.contributedBySolvent)}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">You need to add: </span>
+                  <span className="font-mono font-semibold">{fmtGrams(es.adjustedGrams)}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
       {/* Notes (editable) */}
       <div className="bg-card rounded-lg border border-border p-4 mb-6">
         <div className="flex items-center justify-between mb-2">
