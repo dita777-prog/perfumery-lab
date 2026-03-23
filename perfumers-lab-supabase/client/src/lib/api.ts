@@ -121,6 +121,14 @@ export async function deleteJson(url: string): Promise<void> {
   const table = urlToTable[basePath];
   if (!table) throw new Error(`deleteJson: unknown URL ${url}`);
 
+
+    // Special: when deleting a formula, first nullify FK references in other tables
+  if (table === "formulas" && id) {
+    await supabase.from("tests").update({ formula_id: null }).eq("formula_id", id);
+    await supabase.from("decisions").update({ related_formula_id: null }).eq("related_formula_id", id);
+    await supabase.from("stock_movements").update({ related_formula_id: null }).eq("related_formula_id", id);
+    await supabase.from("formula_ingredients").update({ source_formula_id: null }).eq("source_formula_id", id);
+  }
   const { error } = await supabase.from(table).delete().eq("id", id);
   if (error) throw new Error(`Delete ${table}: ${error.message}`);
 }
