@@ -1,6 +1,6 @@
 // Perfumery Lab — MCP server endpoint for Perplexity
 // Vercel Serverless Function: /api/mcp
-// ESModule version (project uses "type": "module")
+// ESModule + correct Content-Type headers
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -25,9 +25,7 @@ const TOOLS = [
     description: 'Vrátí ingredience konkrétní formule podle jejího ID.',
     inputSchema: {
       type: 'object',
-      properties: {
-        formula_id: { type: 'string', description: 'UUID formule' }
-      },
+      properties: { formula_id: { type: 'string', description: 'UUID formule' } },
       required: ['formula_id']
     }
   },
@@ -95,29 +93,47 @@ async function callTool(name, args) {
   }
 }
 
+function jsonReply(res, data, status = 200) {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Mcp-Session-Id', 'perfumery-lab-session');
+  res.status(status).json(data);
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (req.method === 'GET') {
+    return jsonReply(res, { name: 'perfumery-lab', version: '1.0.0', protocol: 'MCP' });
+  }
+
+  if (req.method !== 'POST') {
+    return jsonReply(res, { error: 'Method not allowed' }, 405);
+  }
 
   let body;
   try {
     body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
   } catch {
-    return res.status(400).json({ error: 'Invalid JSON' });
+    return jsonReply(res, { error: 'Invalid JSON' }, 400);
   }
 
-  if (!body || !body.method) return res.status(400).json({ error: 'Missing method' });
+  if (!body || !body.method) {
+    return jsonReply(res, { error: 'Missing method' }, 400);
+  }
 
-  // Notifications — no response
-  if (body.method.startsWith('notifications/')) return res.status(200).end();
+  // Notifications — no response body needed
+  if (body.method.startsWith('notifications/')) {
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(200).end();
+  }
 
   // initialize
   if (body.method === 'initialize') {
-    return res.status(200).json({
+    return jsonReply(res, {
       jsonrpc: '2.0', id: body.id,
       result: {
         protocolVersion: '2024-11-05',
@@ -129,7 +145,7 @@ export default async function handler(req, res) {
 
   // tools/list
   if (body.method === 'tools/list') {
-    return res.status(200).json({
+    return jsonReply(res, {
       jsonrpc: '2.0', id: body.id,
       result: { tools: TOOLS }
     });
@@ -140,17 +156,17 @@ export default async function handler(req, res) {
     const { name, arguments: args } = body.params;
     try {
       const result = await callTool(name, args || {});
-      return res.status(200).json({
+      return jsonReply(res, {
         jsonrpc: '2.0', id: body.id,
         result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
       });
     } catch (err) {
-      return res.status(200).json({
+      return jsonReply(res, {
         jsonrpc: '2.0', id: body.id,
         error: { code: -32603, message: err.message }
       });
     }
   }
 
-  return res.status(200).json({ jsonrpc: '2.0', id: body.id || null, result: {} });
+  return jsonReply(res, { jsonrpc: '2.0', id: body.id || null, result: {} });
 }
