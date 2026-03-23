@@ -782,6 +782,7 @@ function AddIngredientDialog({ open, onOpenChange, formulaId, materials, allForm
     },
   });
 
+  const options = sourceType === "material" ? materials : allFormulas;
     const { data: families = [] } = useQuery({ queryKey: ["/api/olfactive-families"] });
     const grouped = useMemo(() => {
     const q = search.toLowerCase();
@@ -795,7 +796,8 @@ function AddIngredientDialog({ open, onOpenChange, formulaId, materials, allForm
       byFamily[label].push(mat);
     }
     return Object.entries(byFamily).sort(([a], [b]) => a.localeCompare(b)).map(([label, items]) => ({ label, items }));
-  }, [options, families, search, sourceType]);=> o.name.toLowerCase().includes(search.toLowerCase()));    function handleAdd() {
+    }, [options, families, search, sourceType]);
+    function handleAdd() {
     mutation.mutate({
       formulaId,
       sourceType,
