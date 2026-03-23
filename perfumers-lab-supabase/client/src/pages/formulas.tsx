@@ -208,7 +208,7 @@ function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onB
         // Check if this dilution's solvent matches our solvent material
         const dilSolventMatches = dil.solventMaterialId === solventIng.materialId;
         // Fallback: match by name if solventMaterialId is not set
-        const dilSolventNameMatches = !dil.solventMaterialId && dil.solventName && solventName.toLowerCase().includes(dil.solventName.toLowerCase());
+        const dilSolventNameMatches = !dil.solventMaterialId && dil.solventName && (() => { const etoh = ["etoh","ethanol","alcohol","perfumers alcohol"]; const dpg = ["dpg","dipropylene glycol"]; const ipm = ["ipm","isopropyl myristate"]; const sn = solventName.toLowerCase(); const dn = dil.solventName.toLowerCase(); if (sn.includes(dn) || dn.includes(sn)) return true; for (const group of [etoh, dpg, ipm]) { if (group.some(a => sn.includes(a)) && group.some(a => dn.includes(a))) return true; } return false; })();
         if (!dilSolventMatches && !dilSolventNameMatches) continue;
         // Solvent contributed = weighed grams * (1 - dilutionPercent/100)
         const dilPercent = parseFloat(dil.dilutionPercent || "0");
