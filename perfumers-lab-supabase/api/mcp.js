@@ -1,6 +1,6 @@
 // Perfumery Lab — MCP server endpoint for Perplexity
 // Vercel Serverless Function: /api/mcp
-// ESModule + correct Content-Type headers
+// ESModule + full MCP Streamable HTTP support
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -17,7 +17,7 @@ const TOOLS = [
   },
   {
     name: 'get_formulas',
-    description: 'Vrátí seznam všech parfémových formulí (recepty) včetně verze, statusu, kategorie a poznámek.',
+    description: 'Vrátí seznam všech parfémových formulí včetně verze, statusu, kategorie a poznámek.',
     inputSchema: { type: 'object', properties: {}, required: [] }
   },
   {
@@ -93,80 +93,88 @@ async function callTool(name, args) {
   }
 }
 
-function jsonReply(res, data, status = 200) {
+function setCorsHeaders(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id');
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Mcp-Session-Id', 'perfumery-lab-session');
-  res.status(status).json(data);
+}
+
+async function handleMessage(body) {
+  if (!body || !body.method) return null;
+
+  // Notifications — no response
+  if (body.method.startsWith('notifications/')) return null;
+
+  if (body.method === 'initialize') {
+    return {
+      jsonrpc: '2.0',
+      id: body.id,
+      result: {
+        protocolVersion: '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'perfumery-lab', version: '1.0.0' }
+      }
+    };
+  }
+
+  if (body.method === 'tools/list') {
+    return { jsonrpc: '2.0', id: body.id, result: { tools: TOOLS } };
+  }
+
+  if (body.method === 'tools/call') {
+    const { name, arguments: args } = body.params;
+    try {
+      const result = await callTool(name, args || {});
+      return {
+        jsonrpc: '2.0', id: body.id,
+        result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      };
+    } catch (err) {
+      return { jsonrpc: '2.0', id: body.id, error: { code: -32603, message: err.message } };
+    }
+  }
+
+  return { jsonrpc: '2.0', id: body.id || null, result: {} };
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id');
+  setCorsHeaders(res);
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  // DELETE — session termination
+  if (req.method === 'DELETE') return res.status(200).end();
+
   if (req.method === 'GET') {
-    return jsonReply(res, { name: 'perfumery-lab', version: '1.0.0', protocol: 'MCP' });
+    return res.status(200).json({ name: 'perfumery-lab', version: '1.0.0', protocol: 'MCP' });
   }
 
   if (req.method !== 'POST') {
-    return jsonReply(res, { error: 'Method not allowed' }, 405);
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   let body;
   try {
     body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
   } catch {
-    return jsonReply(res, { error: 'Invalid JSON' }, 400);
+    return res.status(400).json({ error: 'Invalid JSON' });
   }
 
-  if (!body || !body.method) {
-    return jsonReply(res, { error: 'Missing method' }, 400);
-  }
-
-  // Notifications — no response body needed
-  if (body.method.startsWith('notifications/')) {
-    res.setHeader('Content-Type', 'application/json');
-    return res.status(200).end();
-  }
-
-  // initialize
-  if (body.method === 'initialize') {
-    return jsonReply(res, {
-      jsonrpc: '2.0', id: body.id,
-      result: {
-        protocolVersion: '2024-11-05',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'perfumery-lab', version: '1.0.0' }
-      }
-    });
-  }
-
-  // tools/list
-  if (body.method === 'tools/list') {
-    return jsonReply(res, {
-      jsonrpc: '2.0', id: body.id,
-      result: { tools: TOOLS }
-    });
-  }
-
-  // tools/call
-  if (body.method === 'tools/call') {
-    const { name, arguments: args } = body.params;
-    try {
-      const result = await callTool(name, args || {});
-      return jsonReply(res, {
-        jsonrpc: '2.0', id: body.id,
-        result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-      });
-    } catch (err) {
-      return jsonReply(res, {
-        jsonrpc: '2.0', id: body.id,
-        error: { code: -32603, message: err.message }
-      });
+  // Handle batch (array of messages)
+  if (Array.isArray(body)) {
+    const responses = [];
+    for (const msg of body) {
+      const response = await handleMessage(msg);
+      if (response !== null) responses.push(response);
     }
+    if (responses.length === 0) return res.status(200).end();
+    return res.status(200).json(responses);
   }
 
-  return jsonReply(res, { jsonrpc: '2.0', id: body.id || null, result: {} });
+  // Single message
+  const response = await handleMessage(body);
+  if (response === null) return res.status(200).end();
+  return res.status(200).json(response);
 }
