@@ -1,6 +1,6 @@
 // Perfumery Lab — MCP server endpoint for Perplexity
 // Vercel Serverless Function: /api/mcp
-// ESModule + full MCP Streamable HTTP support
+// Compatible with Perplexity MCP connector (SSE + JSON-RPC)
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -12,12 +12,12 @@ const supabase = createClient(
 const TOOLS = [
   {
     name: 'get_materials',
-    description: 'Vrátí seznam všech parfémových materiálů včetně jejich vlastností (čichová rodina, role v pyramidě, síla, stav skladu).',
+    description: 'Vrátí seznam všech parfémových materiálů včetně jejich vlastností.',
     inputSchema: { type: 'object', properties: {}, required: [] }
   },
   {
     name: 'get_formulas',
-    description: 'Vrátí seznam všech parfémových formulí včetně verze, statusu, kategorie a poznámek.',
+    description: 'Vrátí seznam všech parfémových formulí včetně verze a statusu.',
     inputSchema: { type: 'object', properties: {}, required: [] }
   },
   {
@@ -96,15 +96,11 @@ async function callTool(name, args) {
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id');
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Mcp-Session-Id', 'perfumery-lab-session');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
 }
 
-async function handleMessage(body) {
+async function handleJsonRpc(body) {
   if (!body || !body.method) return null;
-
-  // Notifications — no response
   if (body.method.startsWith('notifications/')) return null;
 
   if (body.method === 'initialize') {
@@ -143,17 +139,32 @@ export default async function handler(req, res) {
   setCorsHeaders(res);
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-
-  // DELETE — session termination
   if (req.method === 'DELETE') return res.status(200).end();
 
+  // GET — SSE stream for MCP discovery (required by Perplexity)
   if (req.method === 'GET') {
-    return res.status(200).json({ name: 'perfumery-lab', version: '1.0.0', protocol: 'MCP' });
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const initMessage = {
+      jsonrpc: '2.0',
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'perfumery-lab', version: '1.0.0' }
+      }
+    };
+    res.write(`data: ${JSON.stringify(initMessage)}\n\n`);
+    return res.end();
   }
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  res.setHeader('Content-Type', 'application/json');
 
   let body;
   try {
@@ -162,19 +173,17 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid JSON' });
   }
 
-  // Handle batch (array of messages)
   if (Array.isArray(body)) {
     const responses = [];
     for (const msg of body) {
-      const response = await handleMessage(msg);
+      const response = await handleJsonRpc(msg);
       if (response !== null) responses.push(response);
     }
     if (responses.length === 0) return res.status(200).end();
     return res.status(200).json(responses);
   }
 
-  // Single message
-  const response = await handleMessage(body);
+  const response = await handleJsonRpc(body);
   if (response === null) return res.status(200).end();
   return res.status(200).json(response);
 }
