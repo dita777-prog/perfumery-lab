@@ -1,6 +1,5 @@
 // Perfumery Lab — MCP Streamable HTTP server for Perplexity
 // Vercel Serverless Function: /api/mcp
-
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -101,9 +100,8 @@ function setCors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Mcp-Session-Id');
 }
 
-function handleRequest(msg) {
-  if (!msg || typeof msg !== 'object') return null;
-  if (!msg.method) return null;
+async function processMessage(msg) {
+  if (!msg || typeof msg !== 'object' || !msg.method) return null;
   if (msg.method.startsWith('notifications/')) return null;
 
   const id = msg.id ?? null;
@@ -118,20 +116,24 @@ function handleRequest(msg) {
       }
     };
   }
-
   if (msg.method === 'ping') {
     return { jsonrpc: '2.0', id, result: {} };
   }
-
   if (msg.method === 'tools/list') {
     return { jsonrpc: '2.0', id, result: { tools: TOOLS } };
   }
-
   if (msg.method === 'tools/call') {
-    // Handled async separately
-    return '__async__';
+    const { name, arguments: args } = msg.params || {};
+    try {
+      const result = await callTool(name, args || {});
+      return {
+        jsonrpc: '2.0', id,
+        result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      };
+    } catch (err) {
+      return { jsonrpc: '2.0', id, error: { code: -32603, message: err.message } };
+    }
   }
-
   if (id !== null) {
     return { jsonrpc: '2.0', id, result: {} };
   }
@@ -145,6 +147,16 @@ export default async function handler(req, res) {
   if (req.method === 'DELETE') return res.status(200).end();
 
   if (req.method === 'GET') {
+    const accept = req.headers['accept'] || '';
+    if (accept.includes('text/event-stream')) {
+      // SSE keep-alive for GET (not standard for Streamable HTTP, but handle gracefully)
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.status(200);
+      res.write(': keepalive\n\n');
+      return res.end();
+    }
     res.setHeader('Content-Type', 'application/json');
     return res.status(200).json({
       name: SERVER_INFO.name,
@@ -164,40 +176,32 @@ export default async function handler(req, res) {
   }
   if (!body) return res.status(400).json({ error: 'Empty body' });
 
-  res.setHeader('Content-Type', 'application/json');
+  const accept = req.headers['accept'] || '';
+  const useSSE = accept.includes('text/event-stream');
 
-  // Single message
-  if (!Array.isArray(body)) {
-    const sync = handleRequest(body);
-    if (sync === null) return res.status(202).end();
-    if (sync !== '__async__') return res.status(200).json(sync);
-    // async tool call
-    const { name, arguments: args } = body.params || {};
-    try {
-      const result = await callTool(name, args || {});
-      return res.status(200).json({
-        jsonrpc: '2.0', id: body.id,
-        result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-      });
-    } catch (err) {
-      return res.status(200).json({ jsonrpc: '2.0', id: body.id, error: { code: -32603, message: err.message } });
-    }
-  }
-
-  // Batch
+  const messages = Array.isArray(body) ? body : [body];
   const responses = [];
-  for (const msg of body) {
-    const sync = handleRequest(msg);
-    if (sync === null) continue;
-    if (sync !== '__async__') { responses.push(sync); continue; }
-    const { name, arguments: args } = msg.params || {};
-    try {
-      const result = await callTool(name, args || {});
-      responses.push({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } });
-    } catch (err) {
-      responses.push({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: err.message } });
-    }
+
+  for (const msg of messages) {
+    const resp = await processMessage(msg);
+    if (resp) responses.push(resp);
   }
+
+  if (useSSE) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.status(200);
+    for (const resp of responses) {
+      res.write(`data: ${JSON.stringify(resp)}\n\n`);
+    }
+    return res.end();
+  }
+
+  res.setHeader('Content-Type', 'application/json');
   if (responses.length === 0) return res.status(202).end();
+  if (responses.length === 1 && !Array.isArray(body)) {
+    return res.status(200).json(responses[0]);
+  }
   return res.status(200).json(responses);
 }
