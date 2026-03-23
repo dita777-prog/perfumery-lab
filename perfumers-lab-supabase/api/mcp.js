@@ -53,6 +53,49 @@ const TOOLS = [
     name: 'get_decisions',
     description: 'Returns laboratory decision records.',
     inputSchema: { type: 'object', properties: {}, required: [] }
+  },
+  {
+    name: 'create_formula',
+    description: 'Creates a new fragrance formula or accord.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name of the formula' },
+        version: { type: 'string', description: 'Version string (e.g. v1, 1.0)' },
+        status: { type: 'string', enum: ['draft', 'testing', 'approved'], description: 'Initial status' },
+        notes: { type: 'string', description: 'General notes' }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'add_formula_ingredient',
+    description: 'Adds an ingredient to a formula.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        formula_id: { type: 'string', description: 'Target Formula UUID' },
+        material_id: { type: 'string', description: 'Material UUID' },
+        amount: { type: 'number', description: 'Amount in grams or percent' },
+        notes: { type: 'string', description: 'Specific notes for this ingredient' }
+      },
+      required: ['formula_id', 'material_id', 'amount']
+    }
+  },
+  {
+    name: 'update_formula',
+    description: 'Updates an existing formula properties.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Formula UUID' },
+        name: { type: 'string' },
+        version: { type: 'string' },
+        status: { type: 'string', enum: ['draft', 'testing', 'approved'] },
+        notes: { type: 'string' }
+      },
+      required: ['id']
+    }
   }
 ];
 
@@ -93,8 +136,23 @@ async function callTool(name, args) {
       if (error) throw new Error(error.message);
       return data;
     }
-    default:
-      throw new Error(`Unknown tool: ${name}`);
+    case 'create_formula': {
+      const { data, error } = await supabase.from('formulas').insert([args]).select().single();
+      if (error) throw new Error(error.message);
+      return data;
+    }
+    case 'add_formula_ingredient': {
+      const { data, error } = await supabase.from('formula_ingredients').insert([args]).select().single();
+      if (error) throw new Error(error.message);
+      return data;
+    }
+    case 'update_formula': {
+      const { id, ...updates } = args;
+      const { data, error } = await supabase.from('formulas').update(updates).eq('id', id).select().single();
+      if (error) throw new Error(error.message);
+      return data;
+    }
+    default: throw new Error(`Unknown tool: ${name}`);
   }
 }
 
@@ -113,7 +171,8 @@ async function processMessage(msg) {
 
   if (msg.method === 'initialize') {
     return {
-      jsonrpc: '2.0', id,
+      jsonrpc: '2.0',
+      id,
       result: {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
@@ -121,25 +180,37 @@ async function processMessage(msg) {
       }
     };
   }
+
   if (msg.method === 'ping') return { jsonrpc: '2.0', id, result: {} };
+
   if (msg.method === 'tools/list') {
     return { jsonrpc: '2.0', id, result: { tools: TOOLS } };
   }
+
   if (msg.method === 'tools/call') {
     const { name, arguments: args } = msg.params || {};
     try {
       const result = await callTool(name, args || {});
       return {
-        jsonrpc: '2.0', id,
-        result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: false }
+        jsonrpc: '2.0',
+        id,
+        result: {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          isError: false
+        }
       };
     } catch (err) {
       return {
-        jsonrpc: '2.0', id,
-        result: { content: [{ type: 'text', text: err.message }], isError: true }
+        jsonrpc: '2.0',
+        id,
+        result: {
+          content: [{ type: 'text', text: err.message }],
+          isError: true
+        }
       };
     }
   }
+
   if (id !== null && id !== undefined) return { jsonrpc: '2.0', id, result: {} };
   return null;
 }
@@ -155,16 +226,18 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const accept = (req.headers['accept'] || '');
     if (accept.includes('text/event-stream')) {
-      // GET SSE endpoint - return empty stream
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.status(200);
-      res.write(': ping\n\n');
+      res.write(': ping
+
+');
       return res.end();
     }
     res.setHeader('Content-Type', 'application/json');
     return res.status(200).json({
-      name: SERVER_INFO.name, version: SERVER_INFO.version,
+      name: SERVER_INFO.name,
+      version: SERVER_INFO.version,
       protocolVersion: PROTOCOL_VERSION,
       capabilities: { tools: {} }
     });
@@ -176,6 +249,7 @@ export default async function handler(req, res) {
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
   }
+
   if (!body) return res.status(400).json({ error: 'Empty body' });
 
   const accept = (req.headers['accept'] || '');
@@ -183,6 +257,7 @@ export default async function handler(req, res) {
 
   const messages = Array.isArray(body) ? body : [body];
   const responses = [];
+
   for (const msg of messages) {
     const resp = await processMessage(msg);
     if (resp) responses.push(resp);
@@ -195,8 +270,11 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-cache');
     res.status(200);
     for (const resp of responses) {
-      res.write('event: message\n');
-      res.write('data: ' + JSON.stringify(resp) + '\n\n');
+      res.write('event: message
+');
+      res.write('data: ' + JSON.stringify(resp) + '
+
+');
     }
     return res.end();
   }
