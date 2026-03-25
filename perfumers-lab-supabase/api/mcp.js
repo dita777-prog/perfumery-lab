@@ -1,6 +1,4 @@
-// Perfumery Lab - MCP Streamable HTTP server for Perplexity
-// Vercel Serverless Function: /api/mcp
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
 
 // Initialize supabase inside the handler to prevent early crashes if env vars are missing
 let supabase;
@@ -70,15 +68,15 @@ const TOOLS = [
   },
   {
     name: 'add_formula_ingredient',
-    description: 'Adds a new ingredient (raw material OR sub-formula/accord) to a formula.',
+    description: 'Adds a new ingredient to a formula.',
     inputSchema: {
       type: 'object',
       properties: {
-        formula_id: { type: 'string', description: 'Target Formula UUID' },
-        source_type: { type: 'string', enum: ['material', 'formula'], description: 'material = raw material, formula = sub-formula/accord' },
-        material_id: { type: 'string', description: 'Material UUID' },
-        source_formula_id: { type: 'string', description: 'Sub-formula UUID' },
-        dilution_id: { type: 'string', description: 'Dilution UUID' },
+        formula_id: { type: 'string' },
+        source_type: { type: 'string', enum: ['material', 'formula'] },
+        material_id: { type: 'string' },
+        source_formula_id: { type: 'string' },
+        dilution_id: { type: 'string' },
         grams_as_weighed: { type: 'number' },
         neat_grams: { type: 'number' },
         notes: { type: 'string' }
@@ -88,7 +86,7 @@ const TOOLS = [
   },
   {
     name: 'update_formula_ingredient',
-    description: 'Updates the weight/amount of an EXISTING ingredient row.',
+    description: 'Updates an existing ingredient weight.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -102,7 +100,7 @@ const TOOLS = [
   },
   {
     name: 'delete_formula_ingredient',
-    description: 'Removes an ingredient row from a formula.',
+    description: 'Removes an ingredient row.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -113,7 +111,7 @@ const TOOLS = [
   },
   {
     name: 'update_formula',
-    description: 'Updates an existing formula properties.',
+    description: 'Updates formula metadata.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -252,7 +250,7 @@ async function processMessage(msg) {
   return null;
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   setCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
   
@@ -290,4 +288,4 @@ module.exports = async function handler(req, res) {
     return res.status(200).json(responses[0]);
   }
   return res.status(200).json(responses);
-};
+}
