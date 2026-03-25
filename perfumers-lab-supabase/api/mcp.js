@@ -1,4 +1,4 @@
-// Perfumery Lab — MCP Streamable HTTP server for Perplexity
+// Perfumery Lab - MCP Streamable HTTP server for Perplexity
 // Vercel Serverless Function: /api/mcp
 import { createClient } from '@supabase/supabase-js';
 
@@ -152,7 +152,8 @@ async function callTool(name, args) {
       if (error) throw new Error(error.message);
       return data;
     }
-    default: throw new Error(`Unknown tool: ${name}`);
+    default:
+      throw new Error(`Unknown tool: ${name}`);
   }
 }
 
@@ -166,13 +167,11 @@ function setCors(res) {
 async function processMessage(msg) {
   if (!msg || typeof msg !== 'object' || !msg.method) return null;
   if (msg.method.startsWith('notifications/')) return null;
-
   const id = msg.id !== undefined ? msg.id : null;
 
   if (msg.method === 'initialize') {
     return {
-      jsonrpc: '2.0',
-      id,
+      jsonrpc: '2.0', id,
       result: {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
@@ -192,21 +191,13 @@ async function processMessage(msg) {
     try {
       const result = await callTool(name, args || {});
       return {
-        jsonrpc: '2.0',
-        id,
-        result: {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          isError: false
-        }
+        jsonrpc: '2.0', id,
+        result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: false }
       };
     } catch (err) {
       return {
-        jsonrpc: '2.0',
-        id,
-        result: {
-          content: [{ type: 'text', text: err.message }],
-          isError: true
-        }
+        jsonrpc: '2.0', id,
+        result: { content: [{ type: 'text', text: err.message }], isError: true }
       };
     }
   }
@@ -229,9 +220,7 @@ export default async function handler(req, res) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.status(200);
-      res.write(': ping
-
-');
+      res.write(': ping\n\n');
       return res.end();
     }
     res.setHeader('Content-Type', 'application/json');
@@ -249,12 +238,10 @@ export default async function handler(req, res) {
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
   }
-
   if (!body) return res.status(400).json({ error: 'Empty body' });
 
   const accept = (req.headers['accept'] || '');
   const wantsSSE = accept.includes('text/event-stream');
-
   const messages = Array.isArray(body) ? body : [body];
   const responses = [];
 
@@ -270,11 +257,8 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-cache');
     res.status(200);
     for (const resp of responses) {
-      res.write('event: message
-');
-      res.write('data: ' + JSON.stringify(resp) + '
-
-');
+      res.write('event: message\n');
+      res.write('data: ' + JSON.stringify(resp) + '\n\n');
     }
     return res.end();
   }
