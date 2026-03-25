@@ -1,4 +1,4 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
+498import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Plus, Copy, Scale, AlertTriangle, Pencil, Tag, Trash2, ChevronDown, ArrowLeft, Info } from "lucide-react";
@@ -495,18 +495,23 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
   }
 
   function getMaterialDilutions(ing: any) {
-    if (!ing.materialId) return [];
+      // Pro raw materiály vrátit material-specific diluce
+  if (ing.materialId) {
     return dilutions.filter((d: any) => d.sourceMaterialId === ing.materialId);
   }
+  // Pro formuly/accordy vrátit generické diluce (bez sourceMaterialId)
+  if (ing.sourceFormulaId || ing.sourceType === "formula") {
+    return dilutions.filter((d: any) => !d.sourceMaterialId);
+  }
+  return [];
 
   function getIngredientDilutionLabel(ing: any) {
     if (ing.dilutionId) {
       const dil = dilutions.find((d: any) => d.id === ing.dilutionId);
       return dil ? `${fmtNum(dil.dilutionPercent)}%` : "?";
     }
-    if (ing.sourceType === "material") return "100%";
-    return "—";
-  }
+      // Default je 100% (NEAT) pro materiály i formuly/accordy
+  return "100%";
 
   function handleGramsSave(ingId: string) {
     const g = parseEuroInput(gramsValue);
@@ -583,7 +588,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
               <tr key={ing.id} className={`border-b border-border/50 hover:bg-secondary/30 ${hlClass}`}>
                 <td className="p-2 pl-3">
                   <span
-                    className={`cursor-pointer hover:underline ${ing.dilutionId ? "text-[hsl(183,70%,50%)]" : ""}`} onClick={() => ing.materialId && onMaterialClick?.(ing.materialId)}
+                    className={`cursor-pointer hover:underline ${ing.dilutionId ? "text-[hsl(183,70%,50%)]" : ""}`} onClick={() =>  onMaterialClick?.(ing.materialId)}
                     onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, ing }); }}
                   >
                     {getIngredientName(ing)}
@@ -597,7 +602,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
                     <select
                       className="bg-secondary text-xs rounded px-1 py-0.5 border border-border text-foreground w-full"
                       autoFocus
-                      value={ing.dilutionId || "__pure__"}
+                      value={ing.dilutionId ||  ? (
                       onChange={(e) => handleDilutionChange(ing.id, e.target.value === "__pure__" ? null : e.target.value)}
                       onBlur={() => setChangingDilution(null)}
                     >
@@ -608,11 +613,11 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
                     </select>
                   ) : (
                     <span
-                      className={`text-muted-foreground text-xs ${ing.materialId && matDilutions.length > 0 ? 'cursor-pointer hover:text-foreground underline decoration-dotted' : ''}`}
-                      onClick={() => ing.materialId && matDilutions.length > 0 && setChangingDilution(ing.id)}
+{ matDilutions.length > 0 ? 'cursor-pointer hover:text-foreground underline decoration-dotted' : ''}`}
+                      onClick={() =>  matDilutions.length > 0 && setChangingDilution(ing.id)}
                     >
                       {getIngredientDilutionLabel(ing)}
-                    </span>
+                    
                   )}
                 </td>
 
