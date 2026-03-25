@@ -852,7 +852,7 @@ function CreateFormulaDialog({ open, onOpenChange, categories, onCreated }: any)
 
   const mutation = useMutation({
     mutationFn: (data: any) => postJson("/api/formulas", data),
-    onSuccess: () => {
+    onSuccess: (newFormula: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
       onOpenChange(false);
       setName(""); setCatId("");
