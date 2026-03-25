@@ -1,11 +1,9 @@
 // Perfumery Lab - MCP Streamable HTTP server for Perplexity
 // Vercel Serverless Function: /api/mcp
-import { createClient } from '@supabase/supabase-js';
+const { createClient } = require('@supabase/supabase-js');
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+// Initialize supabase inside the handler to prevent early crashes if env vars are missing
+let supabase;
 
 const SERVER_INFO = { name: 'perfumery-lab', version: '1.0.0' };
 const PROTOCOL_VERSION = '2025-03-26';
@@ -72,32 +70,32 @@ const TOOLS = [
   },
   {
     name: 'add_formula_ingredient',
-    description: 'Adds a new ingredient (raw material OR sub-formula/accord) to a formula. For sub-formulas use source_type=\"formula\" and source_formula_id. For raw materials use source_type=\"material\" and material_id. Dita always works at 10% dilutions — gramsAsWeighed is the physical weight, neat_grams = gramsAsWeighed * 0.1 for materials. For sub-formula accords both values are equal (neat).',
+    description: 'Adds a new ingredient (raw material OR sub-formula/accord) to a formula.',
     inputSchema: {
       type: 'object',
       properties: {
         formula_id: { type: 'string', description: 'Target Formula UUID' },
         source_type: { type: 'string', enum: ['material', 'formula'], description: 'material = raw material, formula = sub-formula/accord' },
-        material_id: { type: 'string', description: 'Material UUID (required when source_type = material)' },
-        source_formula_id: { type: 'string', description: 'Sub-formula UUID (required when source_type = formula)' },
-        dilution_id: { type: 'string', description: 'Dilution UUID (optional)' },
-        grams_as_weighed: { type: 'number', description: 'Physical weight in grams as weighed on scale' },
-        neat_grams: { type: 'number', description: 'Neat undiluted grams. For sub-formulas = grams_as_weighed. For 10% dilutions = grams_as_weighed * 0.1' },
-        notes: { type: 'string', description: 'Optional notes for this ingredient' }
+        material_id: { type: 'string', description: 'Material UUID' },
+        source_formula_id: { type: 'string', description: 'Sub-formula UUID' },
+        dilution_id: { type: 'string', description: 'Dilution UUID' },
+        grams_as_weighed: { type: 'number' },
+        neat_grams: { type: 'number' },
+        notes: { type: 'string' }
       },
       required: ['formula_id', 'source_type', 'grams_as_weighed']
     }
   },
   {
     name: 'update_formula_ingredient',
-    description: 'Updates the weight/amount of an EXISTING ingredient row in a formula. Use ingredient_id from get_formula_ingredients. This is the correct tool when ingredient rows already exist with 0g values (e.g. sub-formula accords added via UI). Dita works at 10% dilutions — for sub-formula accords neat_grams = grams_as_weighed; for 10% materials neat_grams = grams_as_weighed * 0.1.',
+    description: 'Updates the weight/amount of an EXISTING ingredient row.',
     inputSchema: {
       type: 'object',
       properties: {
-        ingredient_id: { type: 'string', description: 'Ingredient row UUID (the id field from get_formula_ingredients result)' },
-        grams_as_weighed: { type: 'number', description: 'Physical weight in grams as weighed on scale' },
-        neat_grams: { type: 'number', description: 'Neat undiluted grams. For sub-formula accords = grams_as_weighed. For 10% dilutions = grams_as_weighed * 0.1' },
-        notes: { type: 'string', description: 'Optional notes' }
+        ingredient_id: { type: 'string' },
+        grams_as_weighed: { type: 'number' },
+        neat_grams: { type: 'number' },
+        notes: { type: 'string' }
       },
       required: ['ingredient_id', 'grams_as_weighed']
     }
@@ -108,7 +106,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        ingredient_id: { type: 'string', description: 'Ingredient row UUID' }
+        ingredient_id: { type: 'string' }
       },
       required: ['ingredient_id']
     }
@@ -119,7 +117,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'Formula UUID' },
+        id: { type: 'string' },
         name: { type: 'string' },
         version: { type: 'string' },
         status: { type: 'string', enum: ['draft', 'testing', 'approved'] },
@@ -197,7 +195,6 @@ async function callTool(name, args) {
       if (args.neat_grams !== undefined) {
         updates.neat_grams = String(args.neat_grams);
       } else if (args.grams_as_weighed !== undefined) {
-        // fallback: assume neat for sub-formulas
         updates.neat_grams = String(args.grams_as_weighed);
       }
       if (args.notes !== undefined) updates.notes = args.notes;
@@ -235,9 +232,7 @@ function setCors(res) {
 
 async function processMessage(msg) {
   if (!msg || typeof msg !== 'object' || !msg.method) return null;
-  if (msg.method.startsWith('notifications/')) return null;
   const id = msg.id !== undefined ? msg.id : null;
-
   if (msg.method === 'initialize') {
     return { jsonrpc: '2.0', id, result: { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: { listChanged: false } }, serverInfo: SERVER_INFO } };
   }
@@ -254,31 +249,27 @@ async function processMessage(msg) {
       return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: err.message }], isError: true } };
     }
   }
-  if (id !== null && id !== undefined) return { jsonrpc: '2.0', id, result: {} };
   return null;
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   setCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method === 'DELETE') return res.status(200).end();
+  
+  if (!supabase) {
+    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+    if (!url || !key) {
+      return res.status(500).json({ error: 'Supabase configuration missing' });
+    }
+    supabase = createClient(url, key);
+  }
 
   const sessionId = req.headers['mcp-session-id'] || genId();
   res.setHeader('Mcp-Session-Id', sessionId);
 
   if (req.method === 'GET') {
-    const accept = (req.headers['accept'] || '');
-    if (accept.includes('text/event-stream')) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.status(200);
-      res.write(': ping
-
-');
-      return res.end();
-    }
-    res.setHeader('Content-Type', 'application/json');
-    return res.status(200).json({ name: SERVER_INFO.name, version: SERVER_INFO.version, protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} } });
+    return res.status(200).json({ name: SERVER_INFO.name, version: SERVER_INFO.version });
   }
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -287,37 +278,16 @@ export default async function handler(req, res) {
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
   }
-  if (!body) return res.status(400).json({ error: 'Empty body' });
 
-  const accept = (req.headers['accept'] || '');
-  const wantsSSE = accept.includes('text/event-stream');
   const messages = Array.isArray(body) ? body : [body];
   const responses = [];
-
   for (const msg of messages) {
     const resp = await processMessage(msg);
     if (resp) responses.push(resp);
   }
 
-  if (responses.length === 0) return res.status(202).end();
-
-  if (wantsSSE) {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.status(200);
-    for (const resp of responses) {
-      res.write('event: message
-');
-      res.write('data: ' + JSON.stringify(resp) + '
-
-');
-    }
-    return res.end();
-  }
-
-  res.setHeader('Content-Type', 'application/json');
   if (responses.length === 1 && !Array.isArray(body)) {
     return res.status(200).json(responses[0]);
   }
   return res.status(200).json(responses);
-}
+};
