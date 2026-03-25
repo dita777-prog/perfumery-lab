@@ -3,6 +3,8 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
+    { "source": "/.well-known/oauth-authorization-server", "destination": "/api/oauth-metadata" },
+    { "source": "/.well-known/oauth-authorization-server.json", "destination": "/api/oauth-metadata" },
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
