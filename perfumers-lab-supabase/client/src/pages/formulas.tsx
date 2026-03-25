@@ -120,7 +120,7 @@ export default function FormulasPage() {
         )}
               </div>
             
-      <CreateFormulaDialog open={showCreate} onOpenChange={setShowCreate} categories={categories} />
+      <CreateFormulaDialog open={showCreate} onOpenChange={setShowCreate} categories={categories} onCreated={(id) => setSelectedId(id)} />
       <CategoryManagerDialog open={showCatManager} onOpenChange={setShowCatManager} />
             {/* Formula context menu */}
             {formulaCtxMenu && (
@@ -843,7 +843,7 @@ function AddIngredientDialog({ open, onOpenChange, formulaId, materials, allForm
 }
 
 // ─── Create Formula Dialog (no productType, with inline category creation) ──
-function CreateFormulaDialog({ open, onOpenChange, categories }: any) {
+function CreateFormulaDialog({ open, onOpenChange, categories, onCreated }: any) {
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [catId, setCatId] = useState("");
@@ -856,7 +856,7 @@ function CreateFormulaDialog({ open, onOpenChange, categories }: any) {
       queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
       onOpenChange(false);
       setName(""); setCatId("");
-      toast({ title: "Formula created" });
+      toast({ title: "Formula created" });     onCreated?.(newFormula.id);
     },
   });
 
