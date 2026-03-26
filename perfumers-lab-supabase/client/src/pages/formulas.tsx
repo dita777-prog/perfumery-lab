@@ -620,7 +620,8 @@ className={ (matDilutions.length > 0 || ing.sourceFormulaId) ? 'cursor-pointer h
                     >
                       {getIngredientDilutionLabel(ing)}
                     
-                  )}
+                                  </span>
+)}
                 </td>
 
                 {/* Weighed grams — click to edit inline */}
