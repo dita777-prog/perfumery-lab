@@ -504,6 +504,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
     return dilutions.filter((d: any) => !d.sourceMaterialId);
   }
   return [];
+    }
 
   function getIngredientDilutionLabel(ing: any) {
     if (ing.dilutionId) {
@@ -512,6 +513,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
     }
       // Default je 100% (NEAT) pro materiály i formuly/accordy
   return "100%";
+    }
 
   function handleGramsSave(ingId: string) {
     const g = parseEuroInput(gramsValue);
@@ -613,7 +615,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
                     </select>
                   ) : (
                     <span
-className={ (matDilutions.length > 0 || ing.sourceFormulaId) ? 'cursor-pointer hover:text-foreground underline decoration-dotted' : ''}`}
+className={ (matDilutions.length > 0 || ing.sourceFormulaId) ? 'cursor-pointer hover:text-foreground underline decoration-dotted' : ''}
                       onClick={() =>  (matDilutions.length > 0 || ing.sourceFormulaId) && setChangingDilution(ing.id)}
                     >
                       {getIngredientDilutionLabel(ing)}
