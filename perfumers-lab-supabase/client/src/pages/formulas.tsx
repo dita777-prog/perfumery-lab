@@ -602,7 +602,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
                     <select
                       className="bg-secondary text-xs rounded px-1 py-0.5 border border-border text-foreground w-full"
                       autoFocus
-                      value={ing.dilutionId ||  ? (
+                      value={ing.dilutionId || "__pure__"}
                       onChange={(e) => handleDilutionChange(ing.id, e.target.value === "__pure__" ? null : e.target.value)}
                       onBlur={() => setChangingDilution(null)}
                     >
