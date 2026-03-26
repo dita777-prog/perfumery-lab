@@ -538,7 +538,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
     if (dilutionId) {
       const dil = dilutions.find((d: any) => d.id === dilutionId);
       neatMult = parseFloat(dil?.neatMultiplier || "1");
-      sourceType = "material"; // stays material, just with dilution
+      sourceType = ing.sourceFormulaId ? "formula" : "material";
     }
     updateIngMut.mutate({
       id: ingId,
@@ -598,7 +598,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
 
                 {/* Dilution cell — clickable to change */}
                 <td className="text-center p-2">
-                  {changingDilution === ing.id && ing.materialId ? (
+                  {changingDilution === ing.id && (ing.materialId || ing.sourceFormulaId) ? (
                     <select
                       className="bg-secondary text-xs rounded px-1 py-0.5 border border-border text-foreground w-full"
                       autoFocus
@@ -613,8 +613,8 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
                     </select>
                   ) : (
                     <span
-{ matDilutions.length > 0 ? 'cursor-pointer hover:text-foreground underline decoration-dotted' : ''}`}
-                      onClick={() =>  matDilutions.length > 0 && setChangingDilution(ing.id)}
+{ (matDilutions.length > 0 || ing.sourceFormulaId) ? 'cursor-pointer hover:text-foreground underline decoration-dotted' : ''}`}
+                      onClick={() =>  (matDilutions.length > 0 || ing.sourceFormulaId) && setChangingDilution(ing.id)}
                     >
                       {getIngredientDilutionLabel(ing)}
                     
@@ -684,7 +684,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={e => e.stopPropagation()}
         >
-          <ContextMenuItem label="Change dilution" onClick={() => { setChangingDilution(contextMenu.ing.id); setContextMenu(null); }} disabled={!contextMenu.ing.materialId} />
+          <ContextMenuItem label="Change dilution" onClick={() => { setChangingDilution(contextMenu.ing.id); setContextMenu(null); }} disabled={!contextMenu.ing.materialId && !contextMenu.ing.sourceFormulaId} />
               <ContextMenuItem label="Change raw material" onClick={() => { setChangeMatDialog(contextMenu.ing); setContextMenu(null); }} />
           <div className="h-px bg-border my-1" />
           <ContextMenuItem label="Highlight as too strong" onClick={() => handleHighlight(contextMenu.ing.id, "too_strong")} />
