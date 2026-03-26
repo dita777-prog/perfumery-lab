@@ -613,7 +613,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
                     </select>
                   ) : (
                     <span
-{ (matDilutions.length > 0 || ing.sourceFormulaId) ? 'cursor-pointer hover:text-foreground underline decoration-dotted' : ''}`}
+className={ (matDilutions.length > 0 || ing.sourceFormulaId) ? 'cursor-pointer hover:text-foreground underline decoration-dotted' : ''}`}
                       onClick={() =>  (matDilutions.length > 0 || ing.sourceFormulaId) && setChangingDilution(ing.id)}
                     >
                       {getIngredientDilutionLabel(ing)}
