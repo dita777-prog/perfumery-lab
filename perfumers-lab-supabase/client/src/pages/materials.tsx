@@ -418,10 +418,10 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
     if (editField === "inventory") {
       // Update the first source's stockGrams, or create a source if none
       if (sources.length > 0) {
-        patchJson(`/api/material-sources/${sources[0].id}`, { stockGrams: val || null }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("inventory update failed", err));
-         } else if (editValue) {
-        postJson("/api/material-sources", { materialId: material.id, stockGrams: val }).then(() => { queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }); }).catch((err: any) => console.error("inventory create failed", err));
-}
+        updateSourceMut.mutate({ id: sources[0].id, data: { stockGrams: val || null } });
+      } else if (val) {
+        createSourceMut.mutate({ materialId: material.id, stockGrams: val });
+      }
     } else if (editField === "ifra") {
       if (firstIfra) {
         patchJson(`/api/ifra-limits/${firstIfra.id}`, { limitPercent: val || null }).then(() => {
