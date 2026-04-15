@@ -1,7 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Plus, Copy, Scale, AlertTriangle, Pencil, Tag, Trash2, ChevronDown, ArrowLeft, Info } from "lucide-react";
+import { Plus, Copy, Scale, AlertTriangle, Pencil, Tag, Trash2, ChevronDown, ArrowLeft, Info } from "lucide-react";, Archive
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,11 +53,14 @@ export default function FormulasPage() {
 
   const grouped = categories.map((c: any) => ({
     category: c,
-    formulas: formulas.filter((f: any) => f.categoryId === c.id)
+    formulas: activeFormulas.filter((f: any) => f.categoryId === c.id)
       .filter((f: any) => !filter || f.name.toLowerCase().includes(filter.toLowerCase()))
   })).filter(g => g.formulas.length > 0);
+  
+  // Filtrovat archivované formule ze seznamu
+  const activeFormulas = formulas.filter((f: any) => f.status !== "archive");
 
-  const ungrouped = formulas.filter((f: any) => !f.categoryId)
+  const ungrouped = activeFormulas.filter((f: any) => !f.categoryId)
     .filter((f: any) => !filter || f.name.toLowerCase().includes(filter.toLowerCase()));
 
   const selected = formulas.find((f: any) => f.id === selectedId);
@@ -282,6 +285,46 @@ function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onB
     <div className="p-6 max-w-4xl">
       <div className="flex items-start justify-between mb-4">
         <div>
+
+                  {/* Status switcher */}
+        <div className="flex items-center gap-2 text-xs mb-4">
+          <span className="text-muted-foreground">Status:</span>
+          <button
+            className={`px-2 py-0.5 rounded text-xs transition-colors ${
+              formula.status === "active" || !formula.status
+                ? "bg-[hsl(183,70%,50%)] text-black"
+                : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+            }`}
+            onClick={() => {
+              const newStatus = "active";
+              patchJson(`/api/formulas/${formula.id}`, { status: newStatus }).then(() => {
+                queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+              });
+            }}
+          >
+            Active
+          </button>
+          <button
+            className={`px-2 py-0.5 rounded text-xs transition-colors ${
+              formula.status === "archive"
+                ? "bg-[hsl(183,70%,50%)] text-black"
+                : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+            }`}
+            onClick={() => {
+              const newStatus = "archive";
+              patchJson(`/api/formulas/${formula.id}`, {
+                status: newStatus,
+                archivedAt: new Date().toISOString(),
+              }).then(() => {
+                queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+                toast({ title: "Formula moved to archive" });
+              });
+            }}
+          >
+            <Archive size={12} className="inline mr-1" />
+            Archive
+          </button>
+        </div>
                     {editingName ? (<input ref={nameInputRef} className="text-xl font-semibold bg-transparent border-b-2 border-[hsl(183,70%,50%)] outline-none w-full" value={nameValue} onChange={e => setNameValue(e.target.value)} onBlur={() => { const t = nameValue.trim(); if (t && t !== formula.name) renameMut.mutate(t); else setEditingName(false); }} onKeyDown={e => { if (e.key === "Enter") { e.currentTarget.blur(); } if (e.key === "Escape") { setNameValue(formula.name); setEditingName(false); } }} autoFocus />) : (<h1 className="text-xl font-semibold cursor-pointer hover:text-[hsl(183,70%,50%)] transition-colors group" data-testid="text-formula-name" onClick={() => setEditingName(true)} title="Click to rename">{formula.name} <Pencil size={14} className="inline ml-1 opacity-0 group-hover:opacity-100 transition-opacity" /></h1>)}
           {/* Category dropdown label */}
           <Popover open={catOpen} onOpenChange={(v) => { setCatOpen(v); if (!v) { setNewCatInline(false); setNewCatInlineName(""); } }}>
