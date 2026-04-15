@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { useState } from "react";
 import {
   FlaskConical, Package, Users, TestTube, Lightbulb,
-  BarChart3, Settings, Search, Menu, X, Boxes
+  BarChart3, Settings, Search, Menu, X, Boxes, Archive
 } from "lucide-react";
 import MaterialsPage from "./pages/materials";
 import FormulasPage from "./pages/formulas";
@@ -16,6 +16,7 @@ import DecisionsPage from "./pages/decisions";
 import StockPage from "./pages/stock";
 import SettingsPage from "./pages/settings";
 import SearchPage from "./pages/search";
+import ArchivePage from "./pages/archive";
 import NotFound from "./pages/not-found";
 
 function AppLayout() {
@@ -30,6 +31,7 @@ function AppLayout() {
     { href: "/decisions", icon: Lightbulb, label: "Decisions" },
     { href: "/stock", icon: Boxes, label: "Stock" },
     { href: "/search", icon: Search, label: "Search" },
+    { href: "/archive", icon: Archive, label: "Archive" },
     { href: "/settings", icon: Settings, label: "Settings" },
   ];
 
@@ -88,6 +90,7 @@ function AppLayout() {
           <Route path="/decisions" component={DecisionsPage} />
           <Route path="/stock" component={StockPage} />
           <Route path="/search" component={SearchPage} />
+          <Route path="/archive" component={ArchivePage} />
           <Route path="/settings" component={SettingsPage} />
           <Route component={NotFound} />
         </Switch>
