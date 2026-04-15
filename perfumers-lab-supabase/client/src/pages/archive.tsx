@@ -21,21 +21,20 @@ export default function ArchivePage() {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  const { data: formulas = [], isLoading } = useQuery<ArchivedFormula[]>({
-    queryKey: ["/api/formulas/archived"],
+  const { data: formulas = [], isLoading } = useQueryany[]>({
+    queryKey["/api/formulas"],
     queryFn: async () => {
-      const res = await fetch("/api/formulas?archived=true");
+      const res = await fetch("/api/formulas);
       if (!res.ok) return [];
       return res.json();
     },
   });
 
-  const filtered = formulas.filter((f) =>
-    f.name.toLowerCase().includes(search.toLowerCase())
+  const filtered = formulas.filter((f) => && f.status === "archive");
   );
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 max-w-4xl mx-autf.name.toLowerCase().includes(search.toLowerCase()) o">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <Archive size={22} className="text-[hsl(183,70%,50%)]" />
