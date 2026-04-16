@@ -1,7 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Plus, Copy, Scale, AlertTriangle, Pencil, Tag, Trash2, ChevronDown, ArrowLeft, Info } from "lucide-react";, Archive
+import { Plus, Copy, Scale, AlertTriangle, Pencil, Tag, Trash2, ChevronDown, ArrowLeft, Info, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
