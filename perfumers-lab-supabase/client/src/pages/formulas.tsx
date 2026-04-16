@@ -51,15 +51,15 @@ export default function FormulasPage() {
   const { data: formulas = [] } = useQuery<any[]>({ queryKey: ["/api/formulas"] });
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/formula-categories"] });
 
+  // Filtrovat archivované formule ze seznamu
+  const activeFormulas = formulas.filter((f: any) => f.status !== "archive");
+
   const grouped = categories.map((c: any) => ({
     category: c,
     formulas: activeFormulas.filter((f: any) => f.categoryId === c.id)
       .filter((f: any) => !filter || f.name.toLowerCase().includes(filter.toLowerCase()))
   })).filter(g => g.formulas.length > 0);
   
-  // Filtrovat archivované formule ze seznamu
-  const activeFormulas = formulas.filter((f: any) => f.status !== "archive");
-
   const ungrouped = activeFormulas.filter((f: any) => !f.categoryId)
     .filter((f: any) => !filter || f.name.toLowerCase().includes(filter.toLowerCase()));
 
