@@ -14,27 +14,26 @@ interface ArchivedFormula {
   notes?: string;
   createdAt?: string;
   archivedAt?: string;
+  status?: string;
   ingredients?: { name: string; amount: number; unit: string }[];
 }
 
 export default function ArchivePage() {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
-
-  const { data: formulas = [], isLoading } = useQuer<yany[]>({
-    queryKey["/api/formulas"],
+  const { data: formulas = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/formulas"],
     queryFn: async () => {
-      const res = await fetch("/api/formulas);
+      const res = await fetch("/api/formulas");
       if (!res.ok) return [];
       return res.json();
     },
   });
-
-  const filtered = formulas.filter((f) => && f.status === "archive");
+  const filtered = formulas.filter(
+    (f) => f.status === "archive" && f.name.toLowerCase().includes(search.toLowerCase())
   );
-
   return (
-    <div className="p-6 max-w-4xl mx-autf.name.toLowerCase().includes(search.toLowerCase()) o">
+    <div className="p-6 max-w-4xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <Archive size={22} className="text-[hsl(183,70%,50%)]" />
@@ -43,7 +42,6 @@ export default function ArchivePage() {
           <p className="text-sm text-muted-foreground">Archived formula versions</p>
         </div>
       </div>
-
       {/* Search */}
       <div className="relative mb-6">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -54,7 +52,6 @@ export default function ArchivePage() {
           className="pl-9 bg-secondary/30 border-border"
         />
       </div>
-
       {/* Content */}
       {isLoading ? (
         <div className="space-y-3">
@@ -114,7 +111,6 @@ export default function ArchivePage() {
                   </div>
                 </div>
               </CardHeader>
-
               {expandedId === formula.id && (
                 <CardContent className="pt-0 pb-4 px-4 border-t border-border/50">
                   {formula.notes && (
