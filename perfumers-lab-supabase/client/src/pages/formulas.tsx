@@ -306,8 +306,9 @@ function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onB
             }`}
             onClick={() => {
               const newStatus = "active";
-updateStatusMut.mutate({ status: newStatus });            }}
-          >
+updateStatusMut.mutate({ status: newStatus });
+                      }}
+                      >
             Active
           </button>
           <button
