@@ -21,7 +21,7 @@ export default function ArchivePage() {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  const { data: formulas = [], isLoading } = useQueryany[]>({
+  const { data: formulas = [], isLoading } = useQuer<yany[]>({
     queryKey["/api/formulas"],
     queryFn: async () => {
       const res = await fetch("/api/formulas);
