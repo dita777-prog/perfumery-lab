@@ -281,6 +281,15 @@ function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onB
     },
   });
 
+    const updateStatusMut = useMutation({
+    mutationFn: ({ status, archivedAt }: { status: string; archivedAt?: string }) => 
+      patchJson(`/api/formulas/${formula.id}`, { status, archivedAt }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+      toast({ title: "Formula status updated" });
+    },
+  });
+
   return (
     <div className="p-6 max-w-4xl">
       <div className="flex items-start justify-between mb-4">
@@ -297,10 +306,7 @@ function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onB
             }`}
             onClick={() => {
               const newStatus = "active";
-              patchJson(`/api/formulas/${formula.id}`, { status: newStatus }).then(() => {
-                queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
-              });
-            }}
+updateStatusMut.mutate({ status: newStatus });            }}
           >
             Active
           </button>
@@ -312,13 +318,7 @@ function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onB
             }`}
             onClick={() => {
               const newStatus = "archive";
-              patchJson(`/api/formulas/${formula.id}`, {
-                status: newStatus,
-                archivedAt: new Date().toISOString(),
-              }).then(() => {
-                queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
-                toast({ title: "Formula moved to archive" });
-              });
+        updateStatusMut.mutate({ status: newStatus, archivedAt: new Date().toISOString() });
             }}
           >
             <Archive size={12} className="inline mr-1" />
