@@ -125,8 +125,8 @@ export async function deleteJson(url: string): Promise<void> {
     // Special: when deleting a formula, first nullify FK references in other tables
   if (table === "formulas" && id) {
     await supabase.from("tests").update({ formula_id: null }).eq("formula_id", id);
-    await supabase.from("decisions").update({ related_formula_id: null }).eq("related_formula_id", id);
-    await supabase.from("stock_movements").update({ related_formula_id: null }).eq("related_formula_id", id);
+    await supabase.from("decisions").update({ formula_id: null }).eq("formula_id", id);
+    await supabase.from("stock_movements").update({ formula_id: null }).eq("formula_id", id);
     await supabase.from("formula_ingredients").update({ source_formula_id: null }).eq("source_formula_id", id);
         await supabase.from("formulas").update({ parent_formula_id: null }).eq("parent_formula_id", id);
   }
