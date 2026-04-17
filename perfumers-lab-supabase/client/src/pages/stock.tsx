@@ -114,11 +114,11 @@ export default function StockPage() {
 function StockMovementDialog({ open, onOpenChange, sources }: any) {
   const { toast } = useToast();
   const [sourceId, setSourceId] = useState("");
-  const [type, setType] = useState("purchase");
+  const [type, setType] = useState("restock"
   const [grams, setGrams] = useState("");
 
   const mutation = useMutation({
-    mutationFn: (data: any) => postJson("/api/stock-movements", data),
+    mutationFn: (data: any) => postJsonrestockapi/stock-movements", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] });
       queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] });
@@ -128,11 +128,9 @@ function StockMovementDialog({ open, onOpenChange, sources }: any) {
     },
   });
 
-  const delta = type === "usage" || type === "waste" ? `-${grams}` : grams;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-card border-border">
         <DialogHeader><DialogTitle>Record Stock Movement</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <Select value={sourceId} onValueChange={setSourceId}>
@@ -146,16 +144,15 @@ function StockMovementDialog({ open, onOpenChange, sources }: any) {
           <Select value={type} onValueChange={setType}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="purchase">Purchase (add)</SelectItem>
-              <SelectItem value="usage">Usage (subtract)</SelectItem>
+              <SelectItem value="restock">Restock (add)</SelectItem>
+              <SelectItem value="use">Use (subtract)</SelectItem>
               <SelectItem value="adjustment">Adjustment</SelectItem>
-              <SelectItem value="waste">Waste (subtract)</SelectItem>
+              <SelectItem value="loss">Loss (subtract)</SelectItem>
             </SelectContent>
           </Select>
           <Input placeholder="Grams" value={grams} onChange={e => setGrams(e.target.value)} type="number" step="0.1" />
           <Button className="w-full" disabled={!sourceId || !grams || mutation.isPending} onClick={() => mutation.mutate({
-            materialSourceId: sourceId, movementType: type, gramsDelta: delta,
-          })} data-testid="button-record-movement">
+        materialId: sources.find((s: any) => s.id === sourceId)?.materialId, movementType: type, neatGrams: parseFloat(grams) || 0,          })} data-testid="button-record-movement">
             Record
           </Button>
         </div>
