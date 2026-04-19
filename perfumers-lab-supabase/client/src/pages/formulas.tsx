@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
-import { fmtNum, fmtGrams, fmtPercent, postJson, patchJson, deleteJson, recalcPercents, calcPyramidBreakdown, scaleToTotalWeight, scaleByFactor, scaleToAbsolutePercent, scalePercentByFactor } from "@/lib/api";
+import { fmtNum, fmtGrams, fmtPercent, postJson, patchJson, deleteJson, recalcPercents, calcPyramidBreakdown, scaleToTotalWeight, scaleByFactor, scaleToAbsolutePercent, scalePercentByFactor, isSolventIngredient, calcConcentratePercent, splitAromaticSolventMass } from "@/lib/api";
 
 /** Parse European-style number input (accept both comma and dot as decimal separator) */
 function parseEuroInput(val: string): number {
@@ -179,10 +179,17 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
   // Reset notes when formula changes
   useEffect(() => { setNotesText(formula.formulaNotes || ""); setEditingNotes(false); setNameValue(formula.name); setEditingName(false); }, [formula.id]);
 
-  const enriched = recalcPercents(ingredients);
+  const enriched = recalcPercents(ingredients, materials);
   const totalWeighed = ingredients.reduce((s: number, i: any) => s + parseFloat(i.gramsAsWeighed || "0"), 0);
   const totalNeat = ingredients.reduce((s: number, i: any) => s + parseFloat((i.neatGrams != null ? i.neatGrams : i.gramsAsWeighed) || "0"), 0);
-  const totalPercent = enriched.reduce((s: number, i: any) => s + parseFloat(i.percentInFormula || "0"), 0);
+  // Sum only aromatic percentages for the warning; solvents are shown as
+  // % of the whole batch so they shouldn't count toward the 100% total.
+  const totalPercent = enriched.reduce((s: number, i: any) => {
+    if (isSolventIngredient(i, materials)) return s;
+    return s + parseFloat(i.percentInFormula || "0");
+  }, 0);
+  const concentratePct = calcConcentratePercent(ingredients, materials);
+  const massSplit = splitAromaticSolventMass(ingredients, materials);
   const pyramid = calcPyramidBreakdown(ingredients, materials);
 
     // ─── Exchange Solvent Calculation ───────────────────────────
@@ -411,6 +418,15 @@ updateStatusMut.mutate({ status: newStatus });
               <AlertTriangle size={12} /> {w}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Concentrate summary */}
+      {(massSplit.aromaticNeat > 0 || massSplit.solventNeat > 0) && (
+        <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span>Concentrate: <span className="font-mono text-foreground">{fmtPercent(concentratePct)}</span></span>
+          <span>Aromatic: <span className="font-mono text-foreground">{fmtGrams(massSplit.aromaticNeat)}</span></span>
+          <span>Solvent: <span className="font-mono text-foreground">{fmtGrams(massSplit.solventNeat)}</span></span>
         </div>
       )}
 
@@ -645,17 +661,19 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
               ing.highlightType === "alternative" ? "highlight-alternative" : "";
             const matDilutions = getMaterialDilutions(ing);
 
+            const isSolv = isSolventIngredient(ing, materials);
             return (
-              <tr key={ing.id} className={`border-b border-border/50 hover:bg-secondary/30 ${hlClass}`}>
+              <tr key={ing.id} className={`border-b border-border/50 hover:bg-secondary/30 ${hlClass} ${isSolv ? 'bg-[hsl(200,50%,15%)]/30' : ''}`}>
                 <td className="p-2 pl-3">
                   <span
-                    className={`${ing.materialId ? 'cursor-pointer hover:underline' : ''} ${ing.dilutionId ? "text-[hsl(183,70%,50%)]" : ""}`}
+                    className={`${ing.materialId ? 'cursor-pointer hover:underline' : ''} ${ing.dilutionId ? "text-[hsl(183,70%,50%)]" : ""} ${isSolv ? 'italic text-[hsl(200,80%,65%)]' : ''}`}
                     onClick={() => { if (ing.materialId) onMaterialClick?.(ing.materialId); }}
                     onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, ing }); }}
                   >
                     {getIngredientName(ing)}
                   </span>
                   {ing.sourceType === "formula" && <Badge variant="outline" className="ml-1 text-[9px]">accord</Badge>}
+                  {isSolv && <Badge variant="outline" className="ml-1 text-[9px] border-[hsl(200,80%,65%)] text-[hsl(200,80%,65%)]">solvent</Badge>}
                 </td>
 
                 {/* Dilution cell — clickable to change */}
@@ -994,7 +1012,12 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
   }, [open]);
 
   const currentTotal = ingredients.reduce((s: number, i: any) => s + parseFloat(i.gramsAsWeighed || "0"), 0);
-  const currentConcentration = parseFloat(formula.intendedConcentrationPercent || "0");
+  // Derive current concentration from actual aromatic vs. solvent mass so
+  // solvent-aware scaling works even if intendedConcentrationPercent is stale.
+  const computedConcentration = calcConcentratePercent(ingredients, materials);
+  const currentConcentration = computedConcentration > 0
+    ? computedConcentration
+    : parseFloat(formula.intendedConcentrationPercent || "0");
   const maxPercentFactor = currentConcentration > 0 ? (100 / currentConcentration) : 1;
 
   // Determine which method is active (last typed into)
@@ -1019,13 +1042,16 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
   } else if (activeMethod === "abs_percent") {
     const v = parseEuroInput(absPercentVal);
     if (!isNaN(v) && v > 0 && currentConcentration > 0) {
-      const ratio = v / currentConcentration;
-      preview = scaleByFactor(ingredients, ratio);
+      // Solvent-aware: keep the total batch weight, scale aromatic to the new
+      // concentrate %, and rebalance solvent to fill the rest.
+      const res = scaleToAbsolutePercent(ingredients, currentTotal, v, materials);
+      preview = res.ingredients;
     }
   } else if (activeMethod === "pct_factor") {
     const v = parseEuroInput(percentFactorVal);
     if (!isNaN(v) && v > 0 && currentConcentration > 0) {
-      preview = scaleByFactor(ingredients, v);
+      const res = scalePercentByFactor(ingredients, currentConcentration, v, currentTotal, materials);
+      preview = res.ingredients;
     }
   }
 

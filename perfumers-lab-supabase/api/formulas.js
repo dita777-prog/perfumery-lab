@@ -33,7 +33,7 @@ export default async function handler(req, res) {
 
       const { data: ingredients, error: iErr } = await supabase
         .from('formula_ingredients')
-        .select('*, materials(name, pyramid_role), material_dilutions(name, dilution_percent)')
+        .select('*, materials(name, pyramid_role, treat_as_solvent), material_dilutions(name, dilution_percent)')
         .eq('formula_id', id)
         .order('sort_order');
       if (iErr) throw new Error(iErr.message);
