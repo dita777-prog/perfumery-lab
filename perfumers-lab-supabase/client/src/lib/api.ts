@@ -1,5 +1,34 @@
 import { queryClient } from "./queryClient";
 import { supabase } from "./supabase";
+import type { Material, FormulaIngredient } from "@shared/schema";
+
+// Subset of FormulaIngredient fields the solvent helpers actually read.
+// Accepting a partial shape keeps the helpers usable with preview objects
+// (which may not carry every DB field) without resorting to `any`.
+export type SolventIngredient = Pick<
+  FormulaIngredient,
+  "materialId" | "gramsAsWeighed" | "neatGrams" | "percentInFormula"
+> & { id?: string; [key: string]: unknown };
+
+export type MassSplit = {
+  aromaticNeat: number;
+  solventNeat: number;
+  aromaticWeighed: number;
+  solventWeighed: number;
+};
+
+export type ScaledIngredient = SolventIngredient & {
+  gramsAsWeighed: string;
+  neatGrams: string;
+};
+
+export type ScaleResult = {
+  ingredients: ScaledIngredient[];
+  concentrateWeight: number;
+  solventWeight: number;
+};
+
+export type ScalePercentResult = ScaleResult & { newConcentration: number };
 
 /**
  * Map /api/... URLs to Supabase table names and handle mutations.
@@ -201,22 +230,28 @@ export function calcNeatMultiplier(dilutionPercent: number): number {
 // ─── Solvent-awareness helpers ──────────────────────────────────
 // A single source of truth for "is this ingredient a solvent?" — reads
 // treatAsSolvent off the material the ingredient points to.
-export function isSolventIngredient(ing: any, materials: any[]): boolean {
+export function isSolventIngredient(
+  ing: SolventIngredient | null | undefined,
+  materials: Material[],
+): boolean {
   if (!ing?.materialId) return false;
-  const mat = materials?.find((m: any) => m.id === ing.materialId);
+  const mat = materials?.find((m) => m.id === ing.materialId);
   return !!mat?.treatAsSolvent;
 }
 
-function ingNeat(ing: any): number {
-  return parseFloat(ing?.neatGrams || ing?.gramsAsWeighed || "0");
+function ingNeat(ing: SolventIngredient): number {
+  return parseFloat((ing?.neatGrams ?? ing?.gramsAsWeighed ?? "0") as string);
 }
 
-function ingWeighed(ing: any): number {
-  return parseFloat(ing?.gramsAsWeighed || "0");
+function ingWeighed(ing: SolventIngredient): number {
+  return parseFloat((ing?.gramsAsWeighed ?? "0") as string);
 }
 
 // Sum masses split by solvent flag. Returns neat-grams sums.
-export function splitAromaticSolventMass(ingredients: any[], materials: any[]) {
+export function splitAromaticSolventMass(
+  ingredients: SolventIngredient[],
+  materials: Material[],
+): MassSplit {
   let aromaticNeat = 0;
   let solventNeat = 0;
   let aromaticWeighed = 0;
@@ -237,7 +272,10 @@ export function splitAromaticSolventMass(ingredients: any[], materials: any[]) {
 
 // Actual concentrate percentage given current ingredient masses.
 // concentrate% = aromatic / (aromatic + solvent) × 100
-export function calcConcentratePercent(ingredients: any[], materials: any[]): number {
+export function calcConcentratePercent(
+  ingredients: SolventIngredient[],
+  materials: Material[],
+): number {
   const { aromaticNeat, solventNeat } = splitAromaticSolventMass(ingredients, materials);
   const denom = aromaticNeat + solventNeat;
   if (denom <= 0) return 0;
@@ -268,12 +306,12 @@ export function scaleByFactor(ingredients: any[], factor: number) {
 // ingredients are rebalanced to fill the remainder of finalProductGrams.
 // If the formula has no solvent ingredient yet, aromatic mass is simply
 // scaled to the target concentrate weight.
-export function scaleToAbsolutePercent(
-  ingredients: any[],
+export function scaleToAbsolutePercent<T extends SolventIngredient>(
+  ingredients: T[],
   finalProductGrams: number,
   concentrationPercent: number,
-  materials: any[] = [],
-) {
+  materials: Material[] = [],
+): { ingredients: (T & { gramsAsWeighed: string; neatGrams: string })[] | T[]; concentrateWeight: number; solventWeight: number } {
   const concentrateWeight = finalProductGrams * (concentrationPercent / 100);
   const solventWeight = finalProductGrams - concentrateWeight;
   const { aromaticWeighed, solventWeighed } = splitAromaticSolventMass(ingredients, materials);
@@ -281,12 +319,12 @@ export function scaleToAbsolutePercent(
   const aromaticFactor = concentrateWeight / aromaticWeighed;
   const solventFactor = solventWeighed > 0 ? solventWeight / solventWeighed : 0;
   return {
-    ingredients: ingredients.map(i => {
+    ingredients: ingredients.map((i) => {
       const factor = isSolventIngredient(i, materials) ? solventFactor : aromaticFactor;
       return {
         ...i,
-        gramsAsWeighed: String((parseFloat(i.gramsAsWeighed || "0") * factor).toFixed(3)),
-        neatGrams: String((parseFloat(i.neatGrams || "0") * factor).toFixed(3)),
+        gramsAsWeighed: String((parseFloat((i.gramsAsWeighed ?? "0") as string) * factor).toFixed(3)),
+        neatGrams: String((parseFloat((i.neatGrams ?? "0") as string) * factor).toFixed(3)),
       };
     }),
     concentrateWeight,
@@ -294,13 +332,13 @@ export function scaleToAbsolutePercent(
   };
 }
 
-export function scalePercentByFactor(
-  ingredients: any[],
+export function scalePercentByFactor<T extends SolventIngredient>(
+  ingredients: T[],
   currentConcentration: number,
   factor: number,
   totalBatchGrams: number,
-  materials: any[] = [],
-) {
+  materials: Material[] = [],
+): { ingredients: (T & { gramsAsWeighed: string; neatGrams: string })[] | T[]; concentrateWeight: number; solventWeight: number; newConcentration: number } {
   const newConcentration = currentConcentration * factor;
   const concentrateWeight = totalBatchGrams * (newConcentration / 100);
   const solventWeight = totalBatchGrams - concentrateWeight;
@@ -309,12 +347,12 @@ export function scalePercentByFactor(
   const aromaticFactor = concentrateWeight / aromaticWeighed;
   const solventFactor = solventWeighed > 0 ? solventWeight / solventWeighed : 0;
   return {
-    ingredients: ingredients.map(i => {
+    ingredients: ingredients.map((i) => {
       const f = isSolventIngredient(i, materials) ? solventFactor : aromaticFactor;
       return {
         ...i,
-        gramsAsWeighed: String((parseFloat(i.gramsAsWeighed || "0") * f).toFixed(3)),
-        neatGrams: String((parseFloat(i.neatGrams || "0") * f).toFixed(3)),
+        gramsAsWeighed: String((parseFloat((i.gramsAsWeighed ?? "0") as string) * f).toFixed(3)),
+        neatGrams: String((parseFloat((i.neatGrams ?? "0") as string) * f).toFixed(3)),
       };
     }),
     concentrateWeight,
@@ -331,18 +369,21 @@ export function scalePercentByFactor(
 // glance. If no materials list is passed, the old behaviour (all ingredients
 // against one total) is preserved — callers that care about solvent must
 // pass the materials array.
-export function recalcPercents(ingredients: any[], materials: any[] = []) {
+export function recalcPercents<T extends SolventIngredient>(
+  ingredients: T[],
+  materials: Material[] = [],
+): (T & { percentInFormula: string })[] {
   const hasMaterials = Array.isArray(materials) && materials.length > 0;
   if (!hasMaterials) {
     const totalNeat = ingredients.reduce((sum, i) => sum + ingNeat(i), 0);
-    return ingredients.map(i => ({
+    return ingredients.map((i) => ({
       ...i,
       percentInFormula: totalNeat > 0 ? String(((ingNeat(i) / totalNeat) * 100).toFixed(2)) : "0",
     }));
   }
   const { aromaticNeat, solventNeat } = splitAromaticSolventMass(ingredients, materials);
   const totalNeat = aromaticNeat + solventNeat;
-  return ingredients.map(i => {
+  return ingredients.map((i) => {
     const neat = ingNeat(i);
     const isSolv = isSolventIngredient(i, materials);
     let pct = 0;

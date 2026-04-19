@@ -423,10 +423,26 @@ updateStatusMut.mutate({ status: newStatus });
 
       {/* Concentrate summary */}
       {(massSplit.aromaticNeat > 0 || massSplit.solventNeat > 0) && (
-        <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>Concentrate: <span className="font-mono text-foreground">{fmtPercent(concentratePct)}</span></span>
-          <span>Aromatic: <span className="font-mono text-foreground">{fmtGrams(massSplit.aromaticNeat)}</span></span>
-          <span>Solvent: <span className="font-mono text-foreground">{fmtGrams(massSplit.solventNeat)}</span></span>
+        <div className="mb-4 space-y-1">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span>Concentrate: <span className="font-mono text-foreground">{fmtPercent(concentratePct)}</span></span>
+            <span>Aromatic: <span className="font-mono text-foreground">{fmtGrams(massSplit.aromaticNeat)}</span></span>
+            <span>Solvent: <span className="font-mono text-foreground">{fmtGrams(massSplit.solventNeat)}</span></span>
+          </div>
+          {(() => {
+            const intended = parseFloat(formula.intendedConcentrationPercent || "0");
+            if (!intended || isNaN(intended)) return null;
+            const deviation = Math.abs(concentratePct - intended);
+            if (deviation <= 1.0) return null;
+            return (
+              <div className="inline-flex items-center gap-1.5 text-[11px] text-amber-400 bg-amber-900/20 border border-amber-900/40 rounded px-2 py-1">
+                <AlertTriangle size={11} />
+                <span>
+                  Stored target: {fmtPercent(intended)}, actual: {fmtPercent(concentratePct)} — consider re-scaling.
+                </span>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1077,9 +1093,19 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
           neatGrams: ing.neatGrams,
         });
       }
+      // Auto-sync the formula's stored target concentration to the new
+      // computed concentrate % so the Scale dialog's baseline and the
+      // deviation warning stay in sync after scaling.
+      const newConcentration = calcConcentratePercent(scaledIngs, materials);
+      if (newConcentration > 0) {
+        await patchJson(`/api/formulas/${formula.id}`, {
+          intendedConcentrationPercent: newConcentration.toFixed(2),
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/formulas", formula.id, "ingredients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
       onOpenChange(false);
       toast({ title: "Scaling applied" });
     },
