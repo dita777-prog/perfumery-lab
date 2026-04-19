@@ -34,14 +34,20 @@ function formatTimestamp(iso: string | null | undefined): string {
   return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function todayIso(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function slugifyFormulaName(name: string): string {
-  return (name || "Formula").trim().replace(/\s+/g, "-").replace(/[^\w-]/g, "");
+function generateBatchLabel(formulaName: string, existingBatches: any[]): string {
+  const today = new Date();
+  const dateStr = today.toISOString().slice(0, 10);
+  const slug = (formulaName || "Formula").replace(/\s+/g, "-").replace(/[^\w-]/g, "").replace(/-+/g, "-");
+  const prefix = `${dateStr}-${slug}-`;
+  const existing = existingBatches
+    .map((b: any) => b.batchLabel || b.batch_label || "")
+    .filter((label: string) => label.toLowerCase().startsWith(prefix.toLowerCase()));
+  let maxSuffix = 0;
+  for (const label of existing) {
+    const n = parseInt(label.slice(prefix.length), 10);
+    if (!isNaN(n) && n > maxSuffix) maxSuffix = n;
+  }
+  return `${prefix}${String(maxSuffix + 1).padStart(2, "0")}`;
 }
 
 type EnrichedMovement = {
@@ -70,6 +76,7 @@ export default function StockPage() {
   const { data: materials = [] } = useQuery<any[]>({ queryKey: ["/api/materials"] });
   const { data: suppliers = [] } = useQuery<any[]>({ queryKey: ["/api/suppliers"] });
   const { data: formulas = [] } = useQuery<any[]>({ queryKey: ["/api/formulas"] });
+  const { data: productionBatches = [] } = useQuery<any[]>({ queryKey: ["/api/production-batches"] });
 
   // Enriched movements with joined material/batch info
   const { data: movements = [] } = useQuery<EnrichedMovement[]>({
@@ -287,8 +294,8 @@ export default function StockPage() {
         </div>
       </div>
 
-      <StockMovementDialog open={showMovement} onOpenChange={setShowMovement} sources={enrichedSources} />
-      <ProductionBatchDialog open={showProduction} onOpenChange={setShowProduction} formulas={formulas} />
+      <StockMovementDialog open={showMovement} onOpenChange={setShowMovement} sources={enrichedSources} productionBatches={productionBatches} />
+      <ProductionBatchDialog open={showProduction} onOpenChange={setShowProduction} formulas={formulas} productionBatches={productionBatches} />
       <BatchDetailModal
         batch={selectedBatch}
         movements={movements}
@@ -299,21 +306,33 @@ export default function StockPage() {
   );
 }
 
-function StockMovementDialog({ open, onOpenChange, sources }: any) {
+function StockMovementDialog({ open, onOpenChange, sources, productionBatches }: any) {
   const { toast } = useToast();
   const [sourceId, setSourceId] = useState("");
   const [type, setType] = useState("restock");
   const [grams, setGrams] = useState("");
+  const [productionBatchId, setProductionBatchId] = useState("");
   const [batchLabel, setBatchLabel] = useState("");
   const [notes, setNotes] = useState("");
 
   const reset = () => {
     setSourceId("");
     setGrams("");
+    setProductionBatchId("");
     setBatchLabel("");
     setNotes("");
     setType("restock");
   };
+
+  const sortedBatches = useMemo(() => {
+    const arr = [...(productionBatches || [])];
+    arr.sort((a: any, b: any) => {
+      const ta = a.producedAt ? new Date(a.producedAt).getTime() : 0;
+      const tb = b.producedAt ? new Date(b.producedAt).getTime() : 0;
+      return tb - ta;
+    });
+    return arr.slice(0, 20);
+  }, [productionBatches]);
 
   const mutation = useMutation({
     mutationFn: (data: any) => postJson("/api/stock-movements", data),
@@ -360,14 +379,33 @@ function StockMovementDialog({ open, onOpenChange, sources }: any) {
             <Input placeholder="Grams" value={grams} onChange={(e) => setGrams(e.target.value)} type="number" step="0.1" />
           </div>
           <div>
-            <Label className="text-xs">Batch label (optional)</Label>
-            <Input
-              placeholder="2026-04-19-Clementine-01"
-              value={batchLabel}
-              onChange={(e) => setBatchLabel(e.target.value)}
-              data-testid="input-movement-batch-label"
-            />
-            <p className="text-[10px] text-muted-foreground mt-1">Format: YYYY-MM-DD-Name-NN</p>
+            <Label className="text-xs">Production batch (optional)</Label>
+            <Select
+              value={productionBatchId}
+              onValueChange={(v) => {
+                setProductionBatchId(v);
+                const b = sortedBatches.find((x: any) => x.id === v);
+                setBatchLabel(b?.batchLabel || b?.batch_label || "");
+              }}
+              disabled={sortedBatches.length === 0}
+            >
+              <SelectTrigger data-testid="select-movement-batch">
+                <SelectValue
+                  placeholder={
+                    sortedBatches.length === 0
+                      ? "No batches yet — create one first"
+                      : "Select a batch"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {sortedBatches.map((b: any) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.batchLabel || b.batch_label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <Label className="text-xs">Notes (optional)</Label>
@@ -380,6 +418,7 @@ function StockMovementDialog({ open, onOpenChange, sources }: any) {
               materialSourceId: sourceId,
               movementType: type,
               gramsDelta: String(parseFloat(grams) || 0),
+              productionBatchId: productionBatchId || null,
               batchLabel: batchLabel.trim() || null,
               notes: notes.trim() || null,
             })}
@@ -393,7 +432,7 @@ function StockMovementDialog({ open, onOpenChange, sources }: any) {
   );
 }
 
-function ProductionBatchDialog({ open, onOpenChange, formulas }: any) {
+function ProductionBatchDialog({ open, onOpenChange, formulas, productionBatches }: any) {
   const { toast } = useToast();
   const [formulaId, setFormulaId] = useState("");
   const [batchLabel, setBatchLabel] = useState("");
@@ -423,8 +462,7 @@ function ProductionBatchDialog({ open, onOpenChange, formulas }: any) {
 
   const generateLabel = () => {
     const formula = formulas.find((f: any) => f.id === formulaId);
-    const name = slugifyFormulaName(formula?.name || "Formula");
-    setBatchLabel(`${todayIso()}-${name}-01`);
+    setBatchLabel(generateBatchLabel(formula?.name || "Formula", productionBatches || []));
   };
 
   return (
