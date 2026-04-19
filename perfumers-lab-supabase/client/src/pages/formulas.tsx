@@ -192,20 +192,82 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
     },
   });
 
-  const commitTarget = useCallback(() => {
-    const raw = targetConcInput.trim();
+  // ─── Target concentration: inline validation + debounced autosave ───
+  const targetRaw = targetConcInput.trim();
+  const targetParsed = targetRaw === "" ? NaN : parseEuroInput(targetRaw);
+  const targetIsValid =
+    targetRaw === "" || (!isNaN(targetParsed) && targetParsed > 0 && targetParsed <= 100);
+
+  const [saveStatus, setSaveStatus] = useState<"idle" | "pending" | "saved" | "error">("idle");
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedFlashRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const computeNormalized = useCallback((raw: string): string | null | undefined => {
+    // undefined = no-op (same as stored), null = clear, string = new value
     const stored = formula.intendedConcentrationPercent ?? "";
-    if (raw === "" && stored === "") return;
     if (raw === "") {
-      if (stored !== "") updateTargetMut.mutate(null);
-      return;
+      return stored === "" ? undefined : null;
     }
     const n = parseEuroInput(raw);
-    if (isNaN(n) || n <= 0 || n > 100) return;
+    if (isNaN(n) || n <= 0 || n > 100) return undefined;
     const normalized = n.toFixed(2);
-    if (normalized === String(stored)) return;
-    updateTargetMut.mutate(normalized);
-  }, [targetConcInput, formula.intendedConcentrationPercent, updateTargetMut]);
+    if (normalized === String(stored)) return undefined;
+    return normalized;
+  }, [formula.intendedConcentrationPercent]);
+
+  const runSave = useCallback((raw: string) => {
+    const next = computeNormalized(raw);
+    if (next === undefined) {
+      setSaveStatus("idle");
+      return;
+    }
+    setSaveStatus("pending");
+    patchJson(`/api/formulas/${formula.id}`, { intendedConcentrationPercent: next })
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+        setSaveStatus("saved");
+        if (savedFlashRef.current) clearTimeout(savedFlashRef.current);
+        savedFlashRef.current = setTimeout(() => setSaveStatus("idle"), 1500);
+      })
+      .catch(() => {
+        setSaveStatus("error");
+      });
+  }, [formula.id, computeNormalized]);
+
+  // Debounce on every valid change
+  useEffect(() => {
+    if (!targetIsValid) {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      return;
+    }
+    const next = computeNormalized(targetRaw);
+    if (next === undefined) return; // nothing to save
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setSaveStatus("pending");
+    saveTimerRef.current = setTimeout(() => {
+      runSave(targetRaw);
+    }, 500);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [targetRaw, targetIsValid, computeNormalized, runSave]);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (savedFlashRef.current) clearTimeout(savedFlashRef.current);
+    };
+  }, []);
+
+  const flushTargetSave = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    if (!targetIsValid) return;
+    runSave(targetRaw);
+  }, [targetRaw, targetIsValid, runSave]);
 
   const enriched = recalcPercents(ingredients, materials);
   const totalWeighed = ingredients.reduce((s: number, i: any) => s + parseFloat(i.gramsAsWeighed || "0"), 0);
@@ -456,32 +518,35 @@ updateStatusMut.mutate({ status: newStatus });
         const hasAromatic = massSplit.aromaticNeat > 0;
         const hasAnyMass = hasAromatic || massSplit.solventNeat > 0;
 
+        const totalNeatMass = massSplit.aromaticNeat + massSplit.solventNeat;
+        const alignmentTolerance = Math.max(0.5, totalNeatMass * 0.01);
+
         let neededDisplay: any = "—";
         let chip: any = null;
         if (hasTarget && hasAromatic) {
           const requiredTotal = massSplit.aromaticNeat / (targetNum / 100);
           const requiredSolvent = requiredTotal - massSplit.aromaticNeat;
           const needed = requiredSolvent - massSplit.solventNeat;
-          if (Math.abs(needed) <= 1) {
+          if (Math.abs(needed) <= alignmentTolerance) {
             neededDisplay = <span className="text-emerald-400">✓ on target</span>;
           } else if (needed > 0) {
             neededDisplay = <span className="text-amber-400">+{fmtGrams(needed)}</span>;
           } else {
             neededDisplay = <span className="text-orange-400">−{fmtGrams(Math.abs(needed))} excess</span>;
           }
-          if (Math.abs(needed) <= 1) {
+          if (Math.abs(needed) <= alignmentTolerance) {
             chip = (
               <Badge variant="outline" className="border-emerald-700 bg-emerald-900/30 text-emerald-300">
                 Aligned
               </Badge>
             );
-          } else if (needed > 1) {
+          } else if (needed > alignmentTolerance) {
             chip = (
               <Badge variant="outline" className="border-amber-700 bg-amber-900/30 text-amber-300">
                 Needs {fmtGrams(needed)} solvent
               </Badge>
             );
-          } else if (needed < -1) {
+          } else if (needed < -alignmentTolerance) {
             chip = (
               <Badge variant="outline" className="border-orange-700 bg-orange-900/30 text-orange-300">
                 Above target by {fmtGrams(Math.abs(needed))}
@@ -501,23 +566,50 @@ updateStatusMut.mutate({ status: newStatus });
                     inputMode="decimal"
                     value={targetConcInput}
                     onChange={(e) => setTargetConcInput(e.target.value)}
-                    onBlur={commitTarget}
-                    onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        flushTargetSave();
+                      }
+                    }}
                     placeholder="e.g. 20"
+                    aria-invalid={!targetIsValid}
                     className="h-8 pr-6 text-sm font-mono"
                     data-testid="input-target-concentration"
                   />
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
                 </div>
+                {!targetIsValid && (
+                  <p className="text-xs text-destructive mt-1">Enter a value between 1 and 100</p>
+                )}
+                {targetIsValid && saveStatus === "pending" && (
+                  <span className="text-xs text-muted-foreground mt-1 inline-block">Saving…</span>
+                )}
+                {targetIsValid && saveStatus === "saved" && (
+                  <span className="text-xs text-emerald-500 mt-1 inline-block">Saved</span>
+                )}
+                {saveStatus === "error" && (
+                  <span className="text-xs text-destructive mt-1 inline-block">Save failed</span>
+                )}
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Actual</div>
+                <div
+                  className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1"
+                  title="Calculated from current formula contents — not stored in the database"
+                >
+                  Actual (live)
+                </div>
                 <div className="h-8 flex items-center font-mono text-sm" data-testid="text-actual-concentration">
                   {hasAnyMass ? fmtPercent(concentratePct) : "—"}
                 </div>
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Required solvent</div>
+                <div
+                  className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1"
+                  title="Calculated from target and current masses — not stored"
+                >
+                  Required solvent
+                </div>
                 <div className="h-8 flex items-center font-mono text-sm" data-testid="text-required-solvent">
                   {neededDisplay}
                 </div>
