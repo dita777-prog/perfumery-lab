@@ -114,11 +114,11 @@ export default function StockPage() {
 function StockMovementDialog({ open, onOpenChange, sources }: any) {
   const { toast } = useToast();
   const [sourceId, setSourceId] = useState("");
-  const [type, setType] = useState("restock"
+  const [type, setType] = useState("restock");
   const [grams, setGrams] = useState("");
 
   const mutation = useMutation({
-    mutationFn: (data: any) => postJsonrestockapi/stock-movements", data),
+    mutationFn: (data: any) => postJson("/api/stock-movements", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] });
       queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] });
@@ -128,9 +128,9 @@ function StockMovementDialog({ open, onOpenChange, sources }: any) {
     },
   });
 
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
         <DialogHeader><DialogTitle>Record Stock Movement</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <Select value={sourceId} onValueChange={setSourceId}>
@@ -152,7 +152,10 @@ function StockMovementDialog({ open, onOpenChange, sources }: any) {
           </Select>
           <Input placeholder="Grams" value={grams} onChange={e => setGrams(e.target.value)} type="number" step="0.1" />
           <Button className="w-full" disabled={!sourceId || !grams || mutation.isPending} onClick={() => mutation.mutate({
-        materialId: sources.find((s: any) => s.id === sourceId)?.materialId, movementType: type, neatGrams: parseFloat(grams) || 0,          })} data-testid="button-record-movement">
+            materialSourceId: sourceId,
+            movementType: type,
+            gramsDelta: String(parseFloat(grams) || 0),
+          })} data-testid="button-record-movement">
             Record
           </Button>
         </div>

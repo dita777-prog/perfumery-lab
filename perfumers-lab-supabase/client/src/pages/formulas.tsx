@@ -118,7 +118,7 @@ export default function FormulasPage() {
       </div>
 
       <div className={`flex-1 overflow-y-auto ${selectedId ? '' : 'hidden md:block'}`}>
-        {viewingMaterialId ? <MaterialCardView materialId={viewingMaterialId} onBack={() => setViewingMaterialId(null)} /> : selected ? <><button onClick={() => setSelectedId(null)} className="md:hidden flex items-center gap-1 pl-14 md:pl-3 pr-3 pt-3 text-sm text-muted-foreground"><ArrowLeft size={16} /> Back</button><FormulaDetail formula={selected} onBack={() => setSelectedId(null)} onMaterialClick={(id: string) => setViewingMaterialId(id)} /></> : (
+        {viewingMaterialId ? <MaterialCardView materialId={viewingMaterialId} onBack={() => setViewingMaterialId(null)} /> : selected ? <><button onClick={() => setSelectedId(null)} className="md:hidden flex items-center gap-1 pl-14 md:pl-3 pr-3 pt-3 text-sm text-muted-foreground"><ArrowLeft size={16} /> Back</button><FormulaDetail formula={selected} onBack={() => setSelectedId(null)} onMaterialClick={(id: string) => setViewingMaterialId(id)} onSelectFormula={(id: string) => { setSelectedId(id); setViewingMaterialId(null); }} /></> : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">Select a formula</div>
         )}
               </div>
@@ -158,7 +158,7 @@ export default function FormulasPage() {
 }
 
 // ─── Formula Detail ─────────────────────────────────────────────
-function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onBack?: () => void; onMaterialClick?: (id: string) => void }) {
+function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { formula: any; onBack?: () => void; onMaterialClick?: (id: string) => void; onSelectFormula?: (id: string) => void }) {
   const { toast } = useToast();
   const [showScale, setShowScale] = useState(false);
   const [showDupDialog, setShowDupDialog] = useState(false);
@@ -263,8 +263,17 @@ function FormulaDetail({ formula, onBack, onMaterialClick }: { formula: any; onB
   });
 
   const dupMutation = useMutation({
-    mutationFn: ({ id, name }: any) => postJson(`/api/formulas/${id}/duplicate`, { name }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/formulas"] }); setShowDupDialog(false); toast({ title: "Formula duplicated" }); },
+    mutationFn: ({ id, name }: any) => postJson<any>(`/api/formulas/${id}/duplicate`, { name }),
+    onSuccess: (newFormula: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/formula-ingredients"] });
+      setShowDupDialog(false);
+      toast({ title: "Formula duplicated" });
+      if (newFormula?.id) onSelectFormula?.(newFormula.id);
+    },
+    onError: (err: any) => {
+      toast({ title: "Failed to duplicate formula", description: err?.message || "Unknown error", variant: "destructive" });
+    },
   });
 
 
@@ -499,7 +508,13 @@ updateStatusMut.mutate({ status: newStatus });
 
       {/* Dialogs */}
       <ScaleDialog open={showScale} onOpenChange={setShowScale} formula={formula} ingredients={ingredients} materials={materials} dilutions={dilutions} allFormulas={allFormulas} />
-      <DuplicateDialog open={showDupDialog} onOpenChange={setShowDupDialog} formula={formula} onDuplicate={(name: string) => dupMutation.mutate({ id: formula.id, name })} />
+      <DuplicateDialog
+        open={showDupDialog}
+        onOpenChange={setShowDupDialog}
+        formula={formula}
+        isPending={dupMutation.isPending}
+        onDuplicate={(name: string) => dupMutation.mutate({ id: formula.id, name })}
+      />
       <AddIngredientDialog open={showAddIngredient} onOpenChange={setShowAddIngredient} formulaId={formula.id} materials={materials} allFormulas={allFormulas.filter((f: any) => f.id !== formula.id)} />
     </div>
   );
@@ -634,7 +649,8 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
               <tr key={ing.id} className={`border-b border-border/50 hover:bg-secondary/30 ${hlClass}`}>
                 <td className="p-2 pl-3">
                   <span
-                    className={`cursor-pointer hover:underline ${ing.dilutionId ? "text-[hsl(183,70%,50%)]" : ""}`} onClick={() =>  onMaterialClick?.(ing.materialId)}
+                    className={`${ing.materialId ? 'cursor-pointer hover:underline' : ''} ${ing.dilutionId ? "text-[hsl(183,70%,50%)]" : ""}`}
+                    onClick={() => { if (ing.materialId) onMaterialClick?.(ing.materialId); }}
                     onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, ing }); }}
                   >
                     {getIngredientName(ing)}
@@ -1214,14 +1230,44 @@ function ScalePreviewTable({ preview, getIngredientName }: { preview: any[]; get
   );
 }
 
-function DuplicateDialog({ open, onOpenChange, formula, onDuplicate }: any) {
-  const [name, setName] = useState(formula?.name ? `${formula.name} copy` : "");
+function DuplicateDialog({ open, onOpenChange, formula, onDuplicate, isPending }: any) {
+  const suggested = formula?.name ? `${formula.name} copy` : "";
+  const [name, setName] = useState(suggested);
+
+  // Reset name each time dialog opens or the source formula changes,
+  // so user always sees the pre-filled suggestion instead of leftover state.
+  useEffect(() => {
+    if (open) setName(suggested);
+  }, [open, formula?.id, formula?.name]);
+
+  const trimmed = name.trim();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="bg-card border-border">
         <DialogHeader><DialogTitle>Duplicate Formula</DialogTitle></DialogHeader>
-        <Input value={name} onChange={e => setName(e.target.value)} placeholder="New name" data-testid="input-duplicate-name" />
-        <Button onClick={() => onDuplicate(name)} disabled={!name} data-testid="button-confirm-duplicate">Create</Button>
+        <div className="space-y-3">
+          <Input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="New formula name"
+            autoFocus
+            onFocus={e => e.currentTarget.select()}
+            onKeyDown={e => {
+              if (e.key === "Enter" && trimmed && !isPending) onDuplicate(trimmed);
+            }}
+            data-testid="input-duplicate-name"
+          />
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>Cancel</Button>
+            <Button
+              onClick={() => onDuplicate(trimmed)}
+              disabled={!trimmed || isPending}
+              data-testid="button-confirm-duplicate"
+            >
+              {isPending ? "Duplicating..." : "Create"}
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -1336,50 +1382,239 @@ function CategoryManagerDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
 
 // ─── Material Card View (opened from ingredient click) ────────
+// Read-only full material record using schema fields from shared/schema.ts.
 function MaterialCardView({ materialId, onBack }: { materialId: string; onBack: () => void }) {
-  const { data: materials = [] } = useQuery({ queryKey: ["/api/materials"] });
-  const { data: families = [] } = useQuery({ queryKey: ["/api/olfactive-families"] });
-  const { data: dilutions = [] } = useQuery({ queryKey: ["/api/dilutions"] });
+  const { data: materials = [] } = useQuery<any[]>({ queryKey: ["/api/materials"] });
+  const { data: families = [] } = useQuery<any[]>({ queryKey: ["/api/olfactive-families"] });
+  const { data: matDilutions = [] } = useQuery<any[]>({
+    queryKey: ["/api/materials", materialId, "dilutions"],
+  });
+  const { data: ifraLimits = [] } = useQuery<any[]>({
+    queryKey: ["/api/materials", materialId, "ifra-limits"],
+  });
+  const { data: sources = [] } = useQuery<any[]>({
+    queryKey: ["/api/materials", materialId, "sources"],
+  });
+  const { data: suppliers = [] } = useQuery<any[]>({ queryKey: ["/api/suppliers"] });
+
   const mat = materials.find((m: any) => m.id === materialId);
   if (!mat) return <div className="p-6 text-muted-foreground">Loading material...</div>;
-  const family = families.find((f: any) => f.id === mat.familyId);
-  const matDilutions = dilutions.filter((d: any) => d.sourceMaterialId === mat.id);
+
+  const family = families.find((f: any) => f.id === mat.olfactiveFamilyId);
+
+  const totalStock = sources.reduce(
+    (sum: number, s: any) => sum + parseFloat(s.stockGrams || "0"),
+    0
+  );
+
+  const cheapestPPG = sources.reduce((best: number | null, s: any) => {
+    const ppg =
+      s.purchasePrice && s.purchaseQuantityGrams
+        ? parseFloat(s.purchasePrice) / parseFloat(s.purchaseQuantityGrams)
+        : s.pricePerGram
+        ? parseFloat(s.pricePerGram)
+        : null;
+    if (ppg === null || isNaN(ppg)) return best;
+    if (best === null || ppg < best) return ppg;
+    return best;
+  }, null as number | null);
+
+  const Field = ({ label, value }: { label: string; value: any }) => {
+    if (value === null || value === undefined || value === "") return null;
+    return (
+      <div className="flex gap-2 py-1.5 border-b border-border/30 last:border-0">
+        <span className="text-xs text-muted-foreground w-40 shrink-0">{label}</span>
+        <span className="text-sm text-foreground break-words">{value}</span>
+      </div>
+    );
+  };
+
+  const Section = ({
+    title,
+    children,
+  }: {
+    title: string;
+    children: React.ReactNode;
+  }) => (
+    <div className="bg-card border border-border rounded-lg p-4 mb-4">
+      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+        {title}
+      </h3>
+      {children}
+    </div>
+  );
+
   return (
-    <div className="p-4 space-y-4 overflow-y-auto">
-      <button onClick={onBack} className="md:hidden flex items-center gap-1 pl-14 md:pl-3 text-sm text-muted-foreground mb-2">
-        <ArrowLeft size={16} /> Back
-      </button>
-      <button onClick={onBack} className="hidden md:flex items-center gap-1 text-sm text-muted-foreground mb-2">
+    <div className="p-4 max-w-3xl overflow-y-auto">
+      <button
+        onClick={onBack}
+        className="flex items-center gap-1 pl-10 md:pl-0 text-sm text-muted-foreground hover:text-foreground mb-3"
+        data-testid="button-material-back"
+      >
         <ArrowLeft size={16} /> Back to formula
       </button>
-      <h2 className="text-xl font-semibold">{mat.name}</h2>
-      <div className="grid grid-cols-2 gap-3 text-sm">
-        {mat.casNumber && <div><span className="text-muted-foreground">CAS:</span> {mat.casNumber}</div>}
-        {family && <div><span className="text-muted-foreground">Family:</span> {family.name}</div>}
-        {mat.supplier && <div><span className="text-muted-foreground">Supplier:</span> {mat.supplier}</div>}
-        {mat.costPerGram && <div><span className="text-muted-foreground">Cost/g:</span> {fmtNum(mat.costPerGram)}</div>}
-        {mat.inventoryGrams && <div><span className="text-muted-foreground">Inventory:</span> {fmtGrams(mat.inventoryGrams)}</div>}
-        {mat.ifraMaxPercent && <div><span className="text-muted-foreground">IFRA max:</span> {fmtPercent(mat.ifraMaxPercent)}</div>}
-        {mat.pyramidPlacement && <div><span className="text-muted-foreground">Pyramid:</span> {mat.pyramidPlacement}</div>}
-      </div>
-      {matDilutions.length > 0 && (
+
+      <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-semibold mb-1">Dilutions</h3>
+          <h2 className="text-xl font-semibold">{mat.name}</h2>
+          {(mat.botanicalName || mat.casNumber) && (
+            <p className="text-sm italic text-muted-foreground mt-0.5">
+              {mat.botanicalName
+                ? mat.botanicalName
+                : mat.casNumber
+                ? `CAS ${mat.casNumber}`
+                : ""}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {family && (
+              <Badge
+                variant="outline"
+                style={{ borderColor: family.color || undefined, color: family.color || undefined }}
+              >
+                {family.name}
+              </Badge>
+            )}
+            {mat.pyramidRole && (
+              <Badge variant="secondary" className="capitalize">
+                {mat.pyramidRole}
+              </Badge>
+            )}
+            {mat.treatAsSolvent && <Badge variant="outline">Solvent</Badge>}
+            {mat.status && <Badge variant="outline">{mat.status}</Badge>}
+          </div>
+        </div>
+      </div>
+
+      <Section title="Identification">
+        <Field label="Name" value={mat.name} />
+        <Field label="CAS number" value={mat.casNumber} />
+        <Field label="Botanical name" value={mat.botanicalName} />
+        <Field
+          label="Alt names"
+          value={Array.isArray(mat.altNames) && mat.altNames.length > 0 ? mat.altNames.join(", ") : null}
+        />
+        <Field label="Olfactive family" value={family?.name} />
+        <Field label="Pyramid role" value={mat.pyramidRole} />
+        <Field
+          label="Tags"
+          value={Array.isArray(mat.tags) && mat.tags.length > 0 ? mat.tags.join(", ") : null}
+        />
+        <Field label="Status" value={mat.status} />
+      </Section>
+
+      <Section title="Safety & Physical">
+        <Field label="Flash point" value={mat.flashPoint} />
+        <Field label="Solubility notes" value={mat.solubilityNotes} />
+        <Field label="Recommended dilutions" value={mat.recommendedDilutions} />
+        <Field
+          label="Treat as solvent"
+          value={mat.treatAsSolvent === true ? "Yes" : mat.treatAsSolvent === false ? "No" : null}
+        />
+      </Section>
+
+      <Section title="Olfactive Profile">
+        <Field label="Strength" value={mat.strength != null ? `${mat.strength}/10` : null} />
+        <Field label="Dominance" value={mat.dominance != null ? `${mat.dominance}/10` : null} />
+        <Field label="Projection" value={mat.projection != null ? `${mat.projection}/10` : null} />
+        <Field label="Sensory notes" value={mat.notesSensory} />
+      </Section>
+
+      <Section title="Behavior">
+        <Field label="In wax" value={mat.behaviorWax} />
+        <Field label="In alcohol" value={mat.behaviorAlcohol} />
+        <Field label="In nebulizer" value={mat.behaviorNebulizer} />
+        <Field label="In diffuser" value={mat.behaviorDiffuser} />
+      </Section>
+
+      {(sources.length > 0 || totalStock > 0 || cheapestPPG != null) && (
+        <Section title="Inventory & Sources">
+          <Field label="Total stock" value={totalStock > 0 ? fmtGrams(totalStock) : null} />
+          <Field
+            label="Cheapest price/g"
+            value={cheapestPPG != null ? fmtNum(cheapestPPG, 4) : null}
+          />
+          {sources.length > 0 && (
+            <div className="mt-2 space-y-1">
+              <p className="text-xs text-muted-foreground">Sources ({sources.length})</p>
+              {sources.map((s: any) => {
+                const sup = suppliers.find((sp: any) => sp.id === s.supplierId);
+                return (
+                  <div
+                    key={s.id}
+                    className="text-xs flex items-center justify-between py-1 border-b border-border/30 last:border-0"
+                  >
+                    <span>
+                      {sup?.name || "Unknown supplier"}
+                      {s.batchLot && (
+                        <span className="text-muted-foreground ml-1">· lot {s.batchLot}</span>
+                      )}
+                    </span>
+                    <span className="text-muted-foreground font-mono">
+                      {s.stockGrams ? fmtGrams(s.stockGrams) : "—"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Section>
+      )}
+
+      {matDilutions.length > 0 && (
+        <Section title={`Dilutions (${matDilutions.length})`}>
           <div className="space-y-1">
             {matDilutions.map((d: any) => (
-              <div key={d.id} className="text-xs text-muted-foreground">
-                {fmtNum(d.dilutionPercent)}%{d.solventName ? ` in ${d.solventName}` : ""}
+              <div
+                key={d.id}
+                className="flex justify-between items-center py-1 border-b border-border/30 last:border-0 text-xs"
+              >
+                <span className="text-foreground">
+                  {d.name || `${fmtNum(d.dilutionPercent)}%`}
+                  {d.solventName && (
+                    <span className="text-muted-foreground ml-1">in {d.solventName}</span>
+                  )}
+                </span>
+                <span className="text-muted-foreground font-mono">
+                  {fmtNum(d.dilutionPercent)}%
+                </span>
               </div>
             ))}
           </div>
-        </div>
+        </Section>
       )}
-      {mat.description && (
-        <div>
-          <h3 className="text-sm font-semibold mb-1">Description</h3>
-          <p className="text-sm whitespace-pre-wrap">{mat.description}</p>
-        </div>
+
+      {ifraLimits.length > 0 && (
+        <Section title="IFRA Limits">
+          {ifraLimits.map((l: any) => (
+            <div
+              key={l.id}
+              className="flex justify-between py-1 border-b border-border/30 last:border-0 text-xs"
+            >
+              <span>
+                {l.productType}
+                {l.ifraCategory && (
+                  <span className="text-muted-foreground ml-1">({l.ifraCategory})</span>
+                )}
+              </span>
+              <span className="font-mono">
+                {l.limitPercent != null ? fmtPercent(l.limitPercent) : "—"}
+              </span>
+            </div>
+          ))}
+        </Section>
       )}
+
+      <Section title="Timestamps">
+        <Field
+          label="Created at"
+          value={mat.createdAt ? new Date(mat.createdAt).toLocaleString() : null}
+        />
+        <Field
+          label="Updated at"
+          value={mat.updatedAt ? new Date(mat.updatedAt).toLocaleString() : null}
+        />
+      </Section>
     </div>
   );
 }
