@@ -1,8 +1,9 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
-import { useMemo, useState } from "react";
-import { Plus, AlertTriangle, ArrowDown, ArrowUp, FlaskConical } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
+import { Plus, AlertTriangle, ArrowDown, ArrowUp, FlaskConical, ChevronRight, ChevronDown } from "lucide-react";
+import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -71,6 +72,8 @@ export default function StockPage() {
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [selectedBatch, setSelectedBatch] = useState<{ label: string; productionBatchId: string | null } | null>(null);
   const [batchSearch, setBatchSearch] = useState("");
+  const [expandedFormulas, setExpandedFormulas] = useState<Record<string, boolean>>({});
+  const [expandedBatches, setExpandedBatches] = useState<Record<string, boolean>>({});
 
   const { data: sources = [] } = useQuery<any[]>({ queryKey: ["/api/material-sources"] });
   const { data: materials = [] } = useQuery<any[]>({ queryKey: ["/api/materials"] });
@@ -143,6 +146,64 @@ export default function StockPage() {
     return m.batchLabel || m.productionBatches?.batchLabel || null;
   };
 
+  const formulaGroups = useMemo(() => {
+    const groups = new Map<string, { formulaId: string; formulaName: string; batches: any[] }>();
+    for (const b of productionBatches) {
+      const fid: string = b.formulaId || b.formula_id || "__unassigned__";
+      const formulaName =
+        formulas.find((f: any) => f.id === fid)?.name || (fid === "__unassigned__" ? "Unassigned" : "—");
+      const existing = groups.get(fid);
+      if (existing) {
+        existing.batches.push(b);
+      } else {
+        groups.set(fid, { formulaId: fid, formulaName, batches: [b] });
+      }
+    }
+    const arr = Array.from(groups.values()).map((g) => {
+      const batches = [...g.batches].sort((a, b) => {
+        const ta = a.producedAt ? new Date(a.producedAt).getTime() : 0;
+        const tb = b.producedAt ? new Date(b.producedAt).getTime() : 0;
+        return tb - ta;
+      });
+      const totalProducedGrams = batches.reduce((acc, b) => acc + (parseFloat(b.producedGrams || b.produced_grams || "0") || 0), 0);
+      const lastBatch = batches[0];
+      const lastProducedAt: string | null = lastBatch?.producedAt || lastBatch?.produced_at || null;
+      const lastBatchLabel: string | null = lastBatch?.batchLabel || lastBatch?.batch_label || null;
+      return {
+        ...g,
+        batches,
+        batchCount: batches.length,
+        totalProducedGrams,
+        lastProducedAt,
+        lastBatchLabel,
+      };
+    });
+    arr.sort((a, b) => {
+      const ta = a.lastProducedAt ? new Date(a.lastProducedAt).getTime() : 0;
+      const tb = b.lastProducedAt ? new Date(b.lastProducedAt).getTime() : 0;
+      return tb - ta;
+    });
+    return arr;
+  }, [productionBatches, formulas]);
+
+  const movementsByBatchId = useMemo(() => {
+    const map = new Map<string, EnrichedMovement[]>();
+    for (const m of movements) {
+      if (m.movementType !== "production" || !m.productionBatchId) continue;
+      const arr = map.get(m.productionBatchId) || [];
+      arr.push(m);
+      map.set(m.productionBatchId, arr);
+    }
+    return map;
+  }, [movements]);
+
+  const formatProducedDate = (iso: string | null | undefined): string => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return format(d, "MMM d, yyyy");
+  };
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-4">
@@ -204,6 +265,165 @@ export default function StockPage() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Production overview grouped by formula */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold">Production</h3>
+          <span className="text-xs text-muted-foreground">
+            {formulaGroups.length} formula{formulaGroups.length === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        <div className="bg-card rounded-lg border border-border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs text-muted-foreground">
+                <th className="w-8 p-2 pl-3"></th>
+                <th className="text-left p-2">Formula</th>
+                <th className="text-right p-2">Total produced</th>
+                <th className="text-right p-2">Batches</th>
+                <th className="text-left p-2">Last produced</th>
+                <th className="text-left p-2 pr-3">Last batch</th>
+              </tr>
+            </thead>
+            <tbody>
+              {formulaGroups.map((g) => {
+                const isOpen = !!expandedFormulas[g.formulaId];
+                return (
+                  <Fragment key={g.formulaId}>
+                    <tr
+                      className="border-b border-border/30 hover:bg-secondary/30 cursor-pointer"
+                      onClick={() =>
+                        setExpandedFormulas((prev) => ({ ...prev, [g.formulaId]: !prev[g.formulaId] }))
+                      }
+                      data-testid={`row-formula-group-${g.formulaId}`}
+                    >
+                      <td className="p-2 pl-3 text-muted-foreground">
+                        {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      </td>
+                      <td className="p-2 font-medium">{g.formulaName}</td>
+                      <td className="text-right p-2 font-mono text-xs">
+                        {fmtGrams(String(g.totalProducedGrams))}
+                      </td>
+                      <td className="text-right p-2 font-mono text-xs">{g.batchCount}</td>
+                      <td className="p-2 text-xs text-muted-foreground">
+                        {formatProducedDate(g.lastProducedAt)}
+                      </td>
+                      <td className="p-2 pr-3 font-mono text-xs text-muted-foreground">
+                        {g.lastBatchLabel || "—"}
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="border-b border-border/30 bg-secondary/10">
+                        <td colSpan={6} className="p-3">
+                          {g.batches.length === 0 ? (
+                            <div className="text-xs text-muted-foreground">No batches.</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {g.batches.map((b: any) => {
+                                const batchId: string = b.id;
+                                const isBatchOpen = !!expandedBatches[batchId];
+                                const trail = movementsByBatchId.get(batchId) || [];
+                                return (
+                                  <div
+                                    key={batchId}
+                                    className="bg-card rounded border border-border/60 overflow-hidden"
+                                  >
+                                    <div
+                                      className="flex items-center gap-3 p-2 cursor-pointer hover:bg-secondary/30"
+                                      onClick={() =>
+                                        setExpandedBatches((prev) => ({ ...prev, [batchId]: !prev[batchId] }))
+                                      }
+                                      data-testid={`row-batch-${batchId}`}
+                                    >
+                                      <span className="text-muted-foreground">
+                                        {isBatchOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                      </span>
+                                      <span className="font-mono text-xs">
+                                        {b.batchLabel || b.batch_label || "—"}
+                                      </span>
+                                      <span className="font-mono text-xs text-muted-foreground">
+                                        {fmtGrams(b.producedGrams || b.produced_grams)}
+                                      </span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {formatProducedDate(b.producedAt || b.produced_at)}
+                                      </span>
+                                      <span className="text-xs text-muted-foreground flex-1 truncate">
+                                        {b.notes || ""}
+                                      </span>
+                                      <span className="text-[10px] text-muted-foreground">
+                                        {trail.length} movement{trail.length === 1 ? "" : "s"}
+                                      </span>
+                                    </div>
+                                    {isBatchOpen && (
+                                      <div className="border-t border-border/60">
+                                        {trail.length === 0 ? (
+                                          <div className="p-3 text-xs text-muted-foreground text-center">
+                                            No stock movements linked to this batch.
+                                          </div>
+                                        ) : (
+                                          <table className="w-full text-sm">
+                                            <thead>
+                                              <tr className="border-b border-border/60 text-xs text-muted-foreground">
+                                                <th className="text-left p-2 pl-3">Material</th>
+                                                <th className="text-right p-2">Δg</th>
+                                                <th className="text-left p-2">Type</th>
+                                                <th className="text-left p-2 pr-3">Notes</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {trail.map((m) => {
+                                                const delta = parseFloat(m.gramsDelta || "0");
+                                                return (
+                                                  <tr key={m.id} className="border-b border-border/30 last:border-b-0">
+                                                    <td className="p-2 pl-3">{materialNameFor(m)}</td>
+                                                    <td
+                                                      className={`text-right p-2 font-mono text-xs ${
+                                                        delta >= 0 ? "text-green-400" : "text-red-400"
+                                                      }`}
+                                                    >
+                                                      {delta >= 0 ? "+" : ""}
+                                                      {fmtGrams(m.gramsDelta)}
+                                                    </td>
+                                                    <td className="p-2">
+                                                      <Badge variant="outline" className="text-[10px]">
+                                                        {m.movementType || "—"}
+                                                      </Badge>
+                                                    </td>
+                                                    <td className="p-2 pr-3 text-xs text-muted-foreground truncate max-w-[20rem]">
+                                                      {m.notes || "—"}
+                                                    </td>
+                                                  </tr>
+                                                );
+                                              })}
+                                            </tbody>
+                                          </table>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+              {formulaGroups.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="p-4 text-center text-xs text-muted-foreground">
+                    No production batches yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Movement history */}
