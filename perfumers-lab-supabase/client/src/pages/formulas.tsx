@@ -1,7 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Plus, Copy, Scale, AlertTriangle, Pencil, Tag, Trash2, ChevronDown, ArrowLeft, Info, Archive } from "lucide-react";
+import { Plus, Copy, Scale, AlertTriangle, Pencil, Tag, Trash2, ChevronDown, ArrowLeft, Info, Archive, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,6 +18,22 @@ function parseEuroInput(val: string): number {
   // Replace comma with dot for parsing
   const normalized = val.replace(",", ".");
   return parseFloat(normalized);
+}
+
+function generateBatchLabel(formulaName: string, existingBatches: any[]): string {
+  const today = new Date();
+  const dateStr = today.toISOString().slice(0, 10);
+  const slug = (formulaName || "Formula").replace(/\s+/g, "-").replace(/[^\w-]/g, "").replace(/-+/g, "-");
+  const prefix = `${dateStr}-${slug}-`;
+  const existing = (existingBatches || [])
+    .map((b: any) => b.batchLabel || b.batch_label || "")
+    .filter((label: string) => label.toLowerCase().startsWith(prefix.toLowerCase()));
+  let maxSuffix = 0;
+  for (const label of existing) {
+    const n = parseInt(label.slice(prefix.length), 10);
+    if (!isNaN(n) && n > maxSuffix) maxSuffix = n;
+  }
+  return `${prefix}${String(maxSuffix + 1).padStart(2, "0")}`;
 }
 
 export default function FormulasPage() {
@@ -163,6 +179,7 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
   const [showScale, setShowScale] = useState(false);
   const [showDupDialog, setShowDupDialog] = useState(false);
   const [showAddIngredient, setShowAddIngredient] = useState(false);
+  const [showCreateBatch, setShowCreateBatch] = useState(false);
     const [editingName, setEditingName] = useState(false);
     const [nameValue, setNameValue] = useState(formula.name);
   const [editingNotes, setEditingNotes] = useState(false);
@@ -176,6 +193,8 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
   const { data: dilutions = [] } = useQuery<any[]>({ queryKey: ["/api/dilutions"] });
   const { data: allFormulas = [] } = useQuery<any[]>({ queryKey: ["/api/formulas"] });
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/formula-categories"] });
+  const { data: materialSources = [] } = useQuery<any[]>({ queryKey: ["/api/material-sources"] });
+  const { data: productionBatches = [] } = useQuery<any[]>({ queryKey: ["/api/production-batches"] });
 
   // Reset notes when formula changes
   useEffect(() => { setNotesText(formula.formulaNotes || ""); setEditingNotes(false); setNameValue(formula.name); setEditingName(false); setTargetConcInput(formula.intendedConcentrationPercent ?? ""); }, [formula.id]);
@@ -492,6 +511,15 @@ updateStatusMut.mutate({ status: newStatus });
           </div>
         </div>
         <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowCreateBatch(true)}
+            disabled={ingredients.length === 0}
+            data-testid="button-create-production-batch"
+          >
+            <FlaskConical size={14} className="mr-1" /> Create Production Batch
+          </Button>
           <Button size="sm" variant="outline" onClick={() => setShowScale(true)} data-testid="button-scale">
             <Scale size={14} className="mr-1" /> Scale
           </Button>
@@ -733,6 +761,15 @@ updateStatusMut.mutate({ status: newStatus });
         onDuplicate={(name: string) => dupMutation.mutate({ id: formula.id, name })}
       />
       <AddIngredientDialog open={showAddIngredient} onOpenChange={setShowAddIngredient} formulaId={formula.id} materials={materials} allFormulas={allFormulas.filter((f: any) => f.id !== formula.id)} />
+      <CreateProductionBatchDialog
+        open={showCreateBatch}
+        onOpenChange={setShowCreateBatch}
+        formula={formula}
+        ingredients={ingredients}
+        materials={materials}
+        materialSources={materialSources}
+        productionBatches={productionBatches}
+      />
     </div>
   );
 }
@@ -1853,5 +1890,292 @@ function MaterialCardView({ materialId, onBack }: { materialId: string; onBack: 
         />
       </Section>
     </div>
+  );
+}
+
+// ─── Create Production Batch Dialog ─────────────────────────────
+function CreateProductionBatchDialog({
+  open,
+  onOpenChange,
+  formula,
+  ingredients,
+  materials,
+  materialSources,
+  productionBatches,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  formula: any;
+  ingredients: any[];
+  materials: any[];
+  materialSources: any[];
+  productionBatches: any[];
+}) {
+  const { toast } = useToast();
+  const [producedGrams, setProducedGrams] = useState<string>("");
+  const [notes, setNotes] = useState<string>("");
+  const [selectedSourceIds, setSelectedSourceIds] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [createdAtDisplay, setCreatedAtDisplay] = useState<string>("");
+
+  // Build deduction rows — for each material ingredient, resolve sources + default source.
+  const deductionRows = useMemo(() => {
+    return ingredients
+      .filter((ing: any) => ing.sourceType === "material" && ing.materialId)
+      .map((ing: any) => {
+        const material = materials.find((m: any) => m.id === ing.materialId);
+        const sourcesForMat = (materialSources || []).filter(
+          (ms: any) => ms.materialId === ing.materialId,
+        );
+        const totalStock = sourcesForMat.reduce(
+          (s: number, src: any) => s + parseFloat(src.stockGrams || "0"),
+          0,
+        );
+        const defaultSource = sourcesForMat
+          .slice()
+          .sort(
+            (a: any, b: any) =>
+              parseFloat(b.stockGrams || "0") - parseFloat(a.stockGrams || "0"),
+          )[0];
+        return {
+          ingredientId: ing.id,
+          materialId: ing.materialId,
+          materialName: material?.name || "Unknown",
+          gramsToDeduct: parseFloat(ing.gramsAsWeighed || "0"),
+          sources: sourcesForMat,
+          totalStock,
+          defaultSourceId: defaultSource?.id || null,
+        };
+      });
+  }, [ingredients, materials, materialSources]);
+
+  const batchLabel = useMemo(() => {
+    if (!open) return "";
+    return generateBatchLabel(formula?.name || "Formula", productionBatches || []);
+  }, [open, formula?.name, productionBatches]);
+
+  // Reset dialog state when it opens
+  useEffect(() => {
+    if (!open) return;
+    setProducedGrams(formula?.totalBatchGrams ? String(formula.totalBatchGrams) : "");
+    setNotes("");
+    setIsSubmitting(false);
+    const defaults: Record<string, string> = {};
+    for (const row of deductionRows) {
+      if (row.defaultSourceId) defaults[row.ingredientId] = row.defaultSourceId;
+    }
+    setSelectedSourceIds(defaults);
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    setCreatedAtDisplay(
+      `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`,
+    );
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleConfirm = async () => {
+    if (!producedGrams || isNaN(parseFloat(producedGrams))) {
+      toast({ title: "Enter produced quantity", variant: "destructive" });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const batch: any = await postJson("/api/production-batches", {
+        batchLabel,
+        formulaId: formula.id,
+        producedGrams: String(parseFloat(producedGrams) || 0),
+        producedAt: new Date().toISOString(),
+        notes: notes.trim() || null,
+      });
+
+      let deductionCount = 0;
+      for (const row of deductionRows) {
+        const sourceId = selectedSourceIds[row.ingredientId];
+        if (!sourceId) continue; // skip if no source available
+        if (row.gramsToDeduct <= 0) continue;
+        await postJson("/api/stock-movements", {
+          materialSourceId: sourceId,
+          movementType: "production",
+          gramsDelta: String(-row.gramsToDeduct),
+          batchLabel,
+          productionBatchId: batch.id,
+          relatedFormulaId: formula.id,
+          notes: `Auto-deducted for batch ${batchLabel}`,
+        });
+        deductionCount += 1;
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["/api/production-batches"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stock-movements", "enriched"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] });
+
+      toast({ title: `Batch ${batchLabel} created — ${deductionCount} materials deducted` });
+      onOpenChange(false);
+    } catch (err: any) {
+      toast({
+        title: "Failed to create batch",
+        description: err?.message || "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!isSubmitting) onOpenChange(v); }}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Create Production Batch</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <div className="text-muted-foreground">Formula</div>
+              <div className="font-medium">{formula?.name}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Batch label</div>
+              <div className="font-mono">{batchLabel}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Timestamp</div>
+              <div className="font-mono">{createdAtDisplay}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Produced grams</div>
+              <Input
+                value={producedGrams}
+                onChange={(e) => setProducedGrams(e.target.value)}
+                type="number"
+                step="0.1"
+                placeholder="e.g. 100"
+                className="h-8 text-sm font-mono"
+                data-testid="input-produced-grams"
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs text-muted-foreground mb-1">Notes (optional)</div>
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              placeholder="Notes about this production batch"
+            />
+          </div>
+
+          <div>
+            <div className="text-xs font-semibold text-muted-foreground mb-2">Stock deductions</div>
+            {deductionRows.length === 0 ? (
+              <div className="text-xs text-muted-foreground p-3 bg-secondary/30 rounded border border-border">
+                No material ingredients to deduct. Only material-sourced ingredients generate stock movements.
+              </div>
+            ) : (
+              <div className="bg-card rounded-lg border border-border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-xs text-muted-foreground">
+                      <th className="text-left p-2 pl-3">Material</th>
+                      <th className="text-right p-2">Deduct (g)</th>
+                      <th className="text-right p-2">Stock (g)</th>
+                      <th className="text-left p-2 pr-3">Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deductionRows.map((row) => {
+                      const noSource = row.sources.length === 0;
+                      const insufficient = !noSource && row.totalStock < row.gramsToDeduct;
+                      return (
+                        <tr key={row.ingredientId} className="border-b border-border/30">
+                          <td className="p-2 pl-3">{row.materialName}</td>
+                          <td className="text-right p-2 font-mono text-xs">
+                            {fmtGrams(row.gramsToDeduct)}
+                          </td>
+                          <td
+                            className={`text-right p-2 font-mono text-xs ${
+                              noSource
+                                ? "text-yellow-400"
+                                : insufficient
+                                ? "text-red-400"
+                                : ""
+                            }`}
+                          >
+                            {noSource ? "—" : fmtGrams(row.totalStock)}
+                          </td>
+                          <td className="p-2 pr-3">
+                            {noSource ? (
+                              <span className="text-xs text-yellow-400">
+                                No stock source — skipped
+                              </span>
+                            ) : row.sources.length === 1 ? (
+                              <span className="text-xs text-muted-foreground">
+                                {fmtGrams(row.sources[0].stockGrams)} available
+                                {insufficient && (
+                                  <span className="ml-2 text-red-400">
+                                    Insufficient stock
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <Select
+                                  value={selectedSourceIds[row.ingredientId] || ""}
+                                  onValueChange={(v) =>
+                                    setSelectedSourceIds((prev) => ({
+                                      ...prev,
+                                      [row.ingredientId]: v,
+                                    }))
+                                  }
+                                >
+                                  <SelectTrigger className="h-7 text-xs">
+                                    <SelectValue placeholder="Pick source" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {row.sources.map((src: any) => (
+                                      <SelectItem key={src.id} value={src.id}>
+                                        {fmtGrams(src.stockGrams)} in stock
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {insufficient && (
+                                  <span className="text-xs text-red-400">
+                                    Insufficient stock
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+              data-testid="button-cancel-production-batch"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirm}
+              disabled={isSubmitting || !producedGrams}
+              data-testid="button-confirm-production-batch"
+            >
+              {isSubmitting ? "Creating…" : "Confirm & Create Batch"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
