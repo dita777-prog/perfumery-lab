@@ -1,33 +1,140 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { useState } from "react";
-import { Plus, AlertTriangle, ArrowDown, ArrowUp } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { useMemo, useState } from "react";
+import { Plus, AlertTriangle, ArrowDown, ArrowUp, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { postJson, fmtNum, fmtGrams } from "@/lib/api";
 
+/** snake_case → camelCase for arbitrary objects (mirrors queryClient helper). */
+function toCamel(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) return obj.map(toCamel);
+  if (typeof obj !== "object") return obj;
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    result[camelKey] = value !== null && typeof value === "object" ? toCamel(value) : value;
+  }
+  return result;
+}
+
+function formatTimestamp(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function todayIso(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function slugifyFormulaName(name: string): string {
+  return (name || "Formula").trim().replace(/\s+/g, "-").replace(/[^\w-]/g, "");
+}
+
+type EnrichedMovement = {
+  id: string;
+  materialSourceId: string | null;
+  movementType: string | null;
+  gramsDelta: string | null;
+  relatedFormulaId: string | null;
+  date: string | null;
+  notes: string | null;
+  batchLabel: string | null;
+  productionBatchId: string | null;
+  createdAt: string | null;
+  materialSources: any | null;
+  productionBatches: any | null;
+};
+
 export default function StockPage() {
-  const { toast } = useToast();
   const [showMovement, setShowMovement] = useState(false);
+  const [showProduction, setShowProduction] = useState(false);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const [selectedBatch, setSelectedBatch] = useState<{ label: string; productionBatchId: string | null } | null>(null);
+  const [batchSearch, setBatchSearch] = useState("");
 
   const { data: sources = [] } = useQuery<any[]>({ queryKey: ["/api/material-sources"] });
   const { data: materials = [] } = useQuery<any[]>({ queryKey: ["/api/materials"] });
   const { data: suppliers = [] } = useQuery<any[]>({ queryKey: ["/api/suppliers"] });
-  const { data: movements = [] } = useQuery<any[]>({ queryKey: ["/api/stock-movements"] });
+  const { data: formulas = [] } = useQuery<any[]>({ queryKey: ["/api/formulas"] });
 
-  const enrichedSources = sources.map((s: any) => ({
-    ...s,
-    materialName: materials.find((m: any) => m.id === s.materialId)?.name || "Unknown",
-    supplierName: suppliers.find((sp: any) => sp.id === s.supplierId)?.name || "—",
-    isLow: s.reorderThresholdGrams && parseFloat(s.stockGrams || "0") <= parseFloat(s.reorderThresholdGrams),
-  })).sort((a: any, b: any) => a.materialName.localeCompare(b.materialName));
+  // Enriched movements with joined material/batch info
+  const { data: movements = [] } = useQuery<EnrichedMovement[]>({
+    queryKey: ["/api/stock-movements", "enriched"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("stock_movements")
+        .select(
+          "*, material_sources(*, materials(name)), production_batches(batch_label, produced_at, produced_grams, formulas(name))",
+        )
+        .order("created_at", { ascending: false });
+      if (error) throw new Error(error.message);
+      return toCamel(data) as EnrichedMovement[];
+    },
+  });
+
+  const enrichedSources = useMemo(() => {
+    return sources
+      .map((s: any) => ({
+        ...s,
+        materialName: materials.find((m: any) => m.id === s.materialId)?.name || "Unknown",
+        supplierName: suppliers.find((sp: any) => sp.id === s.supplierId)?.name || "—",
+        isLow:
+          s.reorderThresholdGrams &&
+          parseFloat(s.stockGrams || "0") <= parseFloat(s.reorderThresholdGrams),
+      }))
+      .sort((a: any, b: any) => a.materialName.localeCompare(b.materialName));
+  }, [sources, materials, suppliers]);
 
   const lowStockCount = enrichedSources.filter((s: any) => s.isLow).length;
+
+  // Filter movements: batch search + optional source selection
+  const filteredMovements = useMemo(() => {
+    const q = batchSearch.trim().toLowerCase();
+    return movements.filter((m) => {
+      if (selectedSourceId && m.materialSourceId !== selectedSourceId) return false;
+      if (q) {
+        const label = (m.batchLabel || "").toLowerCase();
+        const joinedLabel = (m.productionBatches?.batchLabel || "").toLowerCase();
+        if (!label.includes(q) && !joinedLabel.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [movements, batchSearch, selectedSourceId]);
+
+  const materialNameFor = (m: EnrichedMovement): string => {
+    const joined = m.materialSources?.materials?.name;
+    if (joined) return joined;
+    const src = sources.find((s: any) => s.id === m.materialSourceId);
+    if (!src) return "—";
+    return materials.find((mm: any) => mm.id === src.materialId)?.name || "—";
+  };
+
+  const formulaNameFor = (m: EnrichedMovement): string => {
+    const batchFormula = m.productionBatches?.formulas?.name;
+    if (batchFormula) return batchFormula;
+    if (m.relatedFormulaId) {
+      return formulas.find((f: any) => f.id === m.relatedFormulaId)?.name || "—";
+    }
+    return "—";
+  };
+
+  const batchLabelFor = (m: EnrichedMovement): string | null => {
+    return m.batchLabel || m.productionBatches?.batchLabel || null;
+  };
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -40,9 +147,14 @@ export default function StockPage() {
             </p>
           )}
         </div>
-        <Button size="sm" onClick={() => setShowMovement(true)} data-testid="button-add-movement">
-          <Plus size={14} className="mr-1" /> Record Movement
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => setShowProduction(true)} data-testid="button-new-production-batch">
+            <FlaskConical size={14} className="mr-1" /> New Production Batch
+          </Button>
+          <Button size="sm" onClick={() => setShowMovement(true)} data-testid="button-add-movement">
+            <Plus size={14} className="mr-1" /> Record Movement
+          </Button>
+        </div>
       </div>
 
       <div className="bg-card rounded-lg border border-border overflow-hidden">
@@ -59,15 +171,16 @@ export default function StockPage() {
           </thead>
           <tbody>
             {enrichedSources.map((s: any) => (
-              <tr key={s.id}
+              <tr
+                key={s.id}
                 className={`border-b border-border/30 hover:bg-secondary/30 cursor-pointer
-                  ${s.isLow ? 'bg-yellow-900/5' : ''}`}
+                  ${s.isLow ? "bg-yellow-900/5" : ""}`}
                 onClick={() => setSelectedSourceId(s.id === selectedSourceId ? null : s.id)}
               >
                 <td className="p-2 pl-3 font-medium">{s.materialName}</td>
                 <td className="p-2 text-muted-foreground">{s.supplierName}</td>
                 <td className="text-right p-2 font-mono text-xs">€ {fmtNum(s.pricePerGram)}</td>
-                <td className={`text-right p-2 font-mono text-xs ${s.isLow ? 'text-yellow-400' : ''}`}>
+                <td className={`text-right p-2 font-mono text-xs ${s.isLow ? "text-yellow-400" : ""}`}>
                   {fmtGrams(s.stockGrams)}
                 </td>
                 <td className="text-right p-2 font-mono text-xs text-muted-foreground">
@@ -86,27 +199,102 @@ export default function StockPage() {
         </table>
       </div>
 
-      {/* Movement history for selected source */}
-      {selectedSourceId && (
-        <div className="mt-4">
-          <h3 className="text-sm font-semibold mb-2">Movements</h3>
-          <div className="space-y-1">
-            {movements.filter((m: any) => m.materialSourceId === selectedSourceId).map((m: any) => (
-              <div key={m.id} className="flex items-center gap-3 text-xs bg-card rounded p-2 border border-border/50">
-                {parseFloat(m.gramsDelta || "0") > 0 ? <ArrowUp size={12} className="text-green-400" /> : <ArrowDown size={12} className="text-red-400" />}
-                <span className="font-mono">{fmtGrams(m.gramsDelta)}</span>
-                <span className="text-muted-foreground">{m.movementType}</span>
-                <span className="text-muted-foreground ml-auto">{m.date ? new Date(m.date).toLocaleDateString() : ""}</span>
-              </div>
-            ))}
-            {movements.filter((m: any) => m.materialSourceId === selectedSourceId).length === 0 && (
-              <p className="text-xs text-muted-foreground">No movements recorded</p>
+      {/* Movement history */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold">
+            Movements
+            {selectedSourceId && (
+              <button
+                className="ml-2 text-xs text-muted-foreground underline"
+                onClick={() => setSelectedSourceId(null)}
+              >
+                clear material filter
+              </button>
             )}
-          </div>
+          </h3>
+          <Input
+            placeholder="Search by batch label…"
+            value={batchSearch}
+            onChange={(e) => setBatchSearch(e.target.value)}
+            className="w-64"
+            data-testid="input-batch-search"
+          />
         </div>
-      )}
+
+        <div className="bg-card rounded-lg border border-border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs text-muted-foreground">
+                <th className="text-left p-2 pl-3">Timestamp</th>
+                <th className="text-left p-2">Material</th>
+                <th className="text-right p-2">Δg</th>
+                <th className="text-left p-2">Type</th>
+                <th className="text-left p-2">Batch</th>
+                <th className="text-left p-2">Formula</th>
+                <th className="text-left p-2 pr-3">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredMovements.map((m) => {
+                const delta = parseFloat(m.gramsDelta || "0");
+                const label = batchLabelFor(m);
+                return (
+                  <tr key={m.id} className="border-b border-border/30 hover:bg-secondary/30">
+                    <td className="p-2 pl-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                      {formatTimestamp(m.createdAt || m.date)}
+                    </td>
+                    <td className="p-2">{materialNameFor(m)}</td>
+                    <td className={`text-right p-2 font-mono text-xs ${delta >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      <span className="inline-flex items-center justify-end gap-1">
+                        {delta >= 0 ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
+                        {delta >= 0 ? "+" : ""}
+                        {fmtGrams(m.gramsDelta)}
+                      </span>
+                    </td>
+                    <td className="p-2">
+                      <Badge variant="outline" className="text-[10px]">{m.movementType || "—"}</Badge>
+                    </td>
+                    <td className="p-2">
+                      {label ? (
+                        <button
+                          className="text-xs font-mono px-2 py-0.5 rounded bg-secondary hover:bg-secondary/70 border border-border"
+                          onClick={() => setSelectedBatch({ label, productionBatchId: m.productionBatchId })}
+                          data-testid={`chip-batch-${m.id}`}
+                        >
+                          {label}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="p-2 text-muted-foreground">{formulaNameFor(m)}</td>
+                    <td className="p-2 pr-3 text-xs text-muted-foreground truncate max-w-[16rem]">
+                      {m.notes || "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+              {filteredMovements.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="p-4 text-center text-xs text-muted-foreground">
+                    No movements found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <StockMovementDialog open={showMovement} onOpenChange={setShowMovement} sources={enrichedSources} />
+      <ProductionBatchDialog open={showProduction} onOpenChange={setShowProduction} formulas={formulas} />
+      <BatchDetailModal
+        batch={selectedBatch}
+        movements={movements}
+        materialNameFor={materialNameFor}
+        onClose={() => setSelectedBatch(null)}
+      />
     </div>
   );
 }
@@ -116,49 +304,270 @@ function StockMovementDialog({ open, onOpenChange, sources }: any) {
   const [sourceId, setSourceId] = useState("");
   const [type, setType] = useState("restock");
   const [grams, setGrams] = useState("");
+  const [batchLabel, setBatchLabel] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const reset = () => {
+    setSourceId("");
+    setGrams("");
+    setBatchLabel("");
+    setNotes("");
+    setType("restock");
+  };
 
   const mutation = useMutation({
     mutationFn: (data: any) => postJson("/api/stock-movements", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stock-movements", "enriched"] });
       queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] });
       onOpenChange(false);
-      setSourceId(""); setGrams("");
+      reset();
       toast({ title: "Movement recorded" });
     },
   });
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
       <DialogContent>
         <DialogHeader><DialogTitle>Record Stock Movement</DialogTitle></DialogHeader>
         <div className="space-y-3">
-          <Select value={sourceId} onValueChange={setSourceId}>
-            <SelectTrigger><SelectValue placeholder="Material source" /></SelectTrigger>
-            <SelectContent>
-              {sources.map((s: any) => (
-                <SelectItem key={s.id} value={s.id}>{s.materialName} ({s.supplierName})</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={type} onValueChange={setType}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="restock">Restock (add)</SelectItem>
-              <SelectItem value="use">Use (subtract)</SelectItem>
-              <SelectItem value="adjustment">Adjustment</SelectItem>
-              <SelectItem value="loss">Loss (subtract)</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input placeholder="Grams" value={grams} onChange={e => setGrams(e.target.value)} type="number" step="0.1" />
-          <Button className="w-full" disabled={!sourceId || !grams || mutation.isPending} onClick={() => mutation.mutate({
-            materialSourceId: sourceId,
-            movementType: type,
-            gramsDelta: String(parseFloat(grams) || 0),
-          })} data-testid="button-record-movement">
+          <div>
+            <Label className="text-xs">Material source</Label>
+            <Select value={sourceId} onValueChange={setSourceId}>
+              <SelectTrigger><SelectValue placeholder="Material source" /></SelectTrigger>
+              <SelectContent>
+                {sources.map((s: any) => (
+                  <SelectItem key={s.id} value={s.id}>{s.materialName} ({s.supplierName})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Type</Label>
+            <Select value={type} onValueChange={setType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="restock">Restock (add)</SelectItem>
+                <SelectItem value="use">Use (subtract)</SelectItem>
+                <SelectItem value="adjustment">Adjustment</SelectItem>
+                <SelectItem value="loss">Loss (subtract)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Grams</Label>
+            <Input placeholder="Grams" value={grams} onChange={(e) => setGrams(e.target.value)} type="number" step="0.1" />
+          </div>
+          <div>
+            <Label className="text-xs">Batch label (optional)</Label>
+            <Input
+              placeholder="2026-04-19-Clementine-01"
+              value={batchLabel}
+              onChange={(e) => setBatchLabel(e.target.value)}
+              data-testid="input-movement-batch-label"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">Format: YYYY-MM-DD-Name-NN</p>
+          </div>
+          <div>
+            <Label className="text-xs">Notes (optional)</Label>
+            <Textarea placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+          </div>
+          <Button
+            className="w-full"
+            disabled={!sourceId || !grams || mutation.isPending}
+            onClick={() => mutation.mutate({
+              materialSourceId: sourceId,
+              movementType: type,
+              gramsDelta: String(parseFloat(grams) || 0),
+              batchLabel: batchLabel.trim() || null,
+              notes: notes.trim() || null,
+            })}
+            data-testid="button-record-movement"
+          >
             Record
           </Button>
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProductionBatchDialog({ open, onOpenChange, formulas }: any) {
+  const { toast } = useToast();
+  const [formulaId, setFormulaId] = useState("");
+  const [batchLabel, setBatchLabel] = useState("");
+  const [producedGrams, setProducedGrams] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const reset = () => {
+    setFormulaId("");
+    setBatchLabel("");
+    setProducedGrams("");
+    setNotes("");
+  };
+
+  const mutation = useMutation({
+    mutationFn: (data: any) => postJson("/api/production-batches", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/production-batches"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stock-movements", "enriched"] });
+      onOpenChange(false);
+      reset();
+      toast({ title: "Production batch created" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err?.message || "Failed to create batch", variant: "destructive" });
+    },
+  });
+
+  const generateLabel = () => {
+    const formula = formulas.find((f: any) => f.id === formulaId);
+    const name = slugifyFormulaName(formula?.name || "Formula");
+    setBatchLabel(`${todayIso()}-${name}-01`);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>New Production Batch</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs">Formula</Label>
+            <Select value={formulaId} onValueChange={setFormulaId}>
+              <SelectTrigger><SelectValue placeholder="Select formula" /></SelectTrigger>
+              <SelectContent>
+                {formulas.map((f: any) => (
+                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Batch label</Label>
+            <div className="flex gap-2">
+              <Input
+                placeholder="2026-04-19-Clementine-01"
+                value={batchLabel}
+                onChange={(e) => setBatchLabel(e.target.value)}
+                data-testid="input-production-batch-label"
+              />
+              <Button variant="outline" size="sm" onClick={generateLabel} disabled={!formulaId}>
+                Generate
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">Format: YYYY-MM-DD-Name-NN</p>
+          </div>
+          <div>
+            <Label className="text-xs">Produced grams</Label>
+            <Input
+              placeholder="Produced grams"
+              value={producedGrams}
+              onChange={(e) => setProducedGrams(e.target.value)}
+              type="number"
+              step="0.1"
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Notes (optional)</Label>
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+          </div>
+          <Button
+            className="w-full"
+            disabled={!batchLabel || !formulaId || mutation.isPending}
+            onClick={() => mutation.mutate({
+              batchLabel: batchLabel.trim(),
+              formulaId: formulaId || null,
+              producedGrams: producedGrams ? String(parseFloat(producedGrams) || 0) : null,
+              producedAt: new Date().toISOString(),
+              notes: notes.trim() || null,
+            })}
+            data-testid="button-save-production-batch"
+          >
+            Save batch
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BatchDetailModal({ batch, movements, materialNameFor, onClose }: {
+  batch: { label: string; productionBatchId: string | null } | null;
+  movements: EnrichedMovement[];
+  materialNameFor: (m: EnrichedMovement) => string;
+  onClose: () => void;
+}) {
+  const related = useMemo(() => {
+    if (!batch) return [];
+    return movements.filter((m) => {
+      if (batch.productionBatchId && m.productionBatchId === batch.productionBatchId) return true;
+      return (m.batchLabel || m.productionBatches?.batchLabel) === batch.label;
+    });
+  }, [batch, movements]);
+
+  const firstWithBatch = related.find((m) => m.productionBatches);
+  const pb = firstWithBatch?.productionBatches;
+
+  return (
+    <Dialog open={!!batch} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="font-mono text-base">Batch: {batch?.label}</DialogTitle>
+        </DialogHeader>
+        {batch && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3 text-xs">
+              <div>
+                <div className="text-muted-foreground">Formula</div>
+                <div>{pb?.formulas?.name || "—"}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">Produced at</div>
+                <div className="font-mono">{pb?.producedAt ? formatTimestamp(pb.producedAt) : "—"}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">Produced grams</div>
+                <div className="font-mono">{pb?.producedGrams ? fmtGrams(pb.producedGrams) : "—"}</div>
+              </div>
+            </div>
+
+            <div className="bg-card rounded-lg border border-border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs text-muted-foreground">
+                    <th className="text-left p-2 pl-3">Timestamp</th>
+                    <th className="text-left p-2">Material</th>
+                    <th className="text-right p-2">Δg</th>
+                    <th className="text-left p-2">Type</th>
+                    <th className="text-left p-2 pr-3">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {related.map((m) => {
+                    const delta = parseFloat(m.gramsDelta || "0");
+                    return (
+                      <tr key={m.id} className="border-b border-border/30">
+                        <td className="p-2 pl-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                          {formatTimestamp(m.createdAt || m.date)}
+                        </td>
+                        <td className="p-2">{materialNameFor(m)}</td>
+                        <td className={`text-right p-2 font-mono text-xs ${delta >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {delta >= 0 ? "+" : ""}{fmtGrams(m.gramsDelta)}
+                        </td>
+                        <td className="p-2"><Badge variant="outline" className="text-[10px]">{m.movementType || "—"}</Badge></td>
+                        <td className="p-2 pr-3 text-xs text-muted-foreground">{m.notes || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                  {related.length === 0 && (
+                    <tr><td colSpan={5} className="p-4 text-center text-xs text-muted-foreground">No movements linked to this batch.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

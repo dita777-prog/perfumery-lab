@@ -208,6 +208,8 @@ export type StockMovement = {
   relatedFormulaId: string | null;
   date: string | null;
   notes: string | null;
+  batchLabel: string | null;
+  productionBatchId: string | null;
   createdAt: string | null;
 };
 export type InsertStockMovement = Omit<StockMovement, "id" | "createdAt">;
@@ -235,6 +237,18 @@ export type Attachment = {
   createdAt: string | null;
 };
 export type InsertAttachment = Omit<Attachment, "id" | "createdAt">;
+
+// 16) Production Batches
+export type ProductionBatch = {
+  id: string;
+  batchLabel: string;
+  formulaId: string | null;
+  producedGrams: string | null;
+  producedAt: string | null;
+  notes: string | null;
+  createdAt: string | null;
+};
+export type InsertProductionBatch = Omit<ProductionBatch, "id" | "createdAt">;
 
 // 15) Audit Log
 export type AuditLog = {
