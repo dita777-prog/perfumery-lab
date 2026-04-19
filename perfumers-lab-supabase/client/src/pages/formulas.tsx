@@ -167,6 +167,7 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
     const [nameValue, setNameValue] = useState(formula.name);
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesText, setNotesText] = useState(formula.formulaNotes || "");
+  const [targetConcInput, setTargetConcInput] = useState<string>(formula.intendedConcentrationPercent ?? "");
 
   const { data: ingredients = [] } = useQuery<any[]>({ queryKey: ["/api/formulas", formula.id, "ingredients"] });
     const nameInputRef = useRef<HTMLInputElement>(null);
@@ -177,7 +178,34 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/formula-categories"] });
 
   // Reset notes when formula changes
-  useEffect(() => { setNotesText(formula.formulaNotes || ""); setEditingNotes(false); setNameValue(formula.name); setEditingName(false); }, [formula.id]);
+  useEffect(() => { setNotesText(formula.formulaNotes || ""); setEditingNotes(false); setNameValue(formula.name); setEditingName(false); setTargetConcInput(formula.intendedConcentrationPercent ?? ""); }, [formula.id]);
+
+  // Keep target input in sync if the formula record updates externally (e.g. scaling).
+  useEffect(() => {
+    setTargetConcInput(formula.intendedConcentrationPercent ?? "");
+  }, [formula.intendedConcentrationPercent]);
+
+  const updateTargetMut = useMutation({
+    mutationFn: (value: string | null) => patchJson(`/api/formulas/${formula.id}`, { intendedConcentrationPercent: value }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+    },
+  });
+
+  const commitTarget = useCallback(() => {
+    const raw = targetConcInput.trim();
+    const stored = formula.intendedConcentrationPercent ?? "";
+    if (raw === "" && stored === "") return;
+    if (raw === "") {
+      if (stored !== "") updateTargetMut.mutate(null);
+      return;
+    }
+    const n = parseEuroInput(raw);
+    if (isNaN(n) || n <= 0 || n > 100) return;
+    const normalized = n.toFixed(2);
+    if (normalized === String(stored)) return;
+    updateTargetMut.mutate(normalized);
+  }, [targetConcInput, formula.intendedConcentrationPercent, updateTargetMut]);
 
   const enriched = recalcPercents(ingredients, materials);
   const totalWeighed = ingredients.reduce((s: number, i: any) => s + parseFloat(i.gramsAsWeighed || "0"), 0);
@@ -421,30 +449,95 @@ updateStatusMut.mutate({ status: newStatus });
         </div>
       )}
 
-      {/* Concentrate summary */}
-      {(massSplit.aromaticNeat > 0 || massSplit.solventNeat > 0) && (
-        <div className="mb-4 space-y-1">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span>Concentrate: <span className="font-mono text-foreground">{fmtPercent(concentratePct)}</span></span>
-            <span>Aromatic: <span className="font-mono text-foreground">{fmtGrams(massSplit.aromaticNeat)}</span></span>
-            <span>Solvent: <span className="font-mono text-foreground">{fmtGrams(massSplit.solventNeat)}</span></span>
-          </div>
-          {(() => {
-            const intended = parseFloat(formula.intendedConcentrationPercent || "0");
-            if (!intended || isNaN(intended)) return null;
-            const deviation = Math.abs(concentratePct - intended);
-            if (deviation <= 1.0) return null;
-            return (
-              <div className="inline-flex items-center gap-1.5 text-[11px] text-amber-400 bg-amber-900/20 border border-amber-900/40 rounded px-2 py-1">
-                <AlertTriangle size={11} />
-                <span>
-                  Stored target: {fmtPercent(intended)}, actual: {fmtPercent(concentratePct)} — consider re-scaling.
-                </span>
-              </div>
+      {/* Concentration panel — live formulation calculator */}
+      {(() => {
+        const targetNum = parseFloat(targetConcInput || formula.intendedConcentrationPercent || "0");
+        const hasTarget = !!targetNum && !isNaN(targetNum) && targetNum > 0;
+        const hasAromatic = massSplit.aromaticNeat > 0;
+        const hasAnyMass = hasAromatic || massSplit.solventNeat > 0;
+
+        let neededDisplay: any = "—";
+        let chip: any = null;
+        if (hasTarget && hasAromatic) {
+          const requiredTotal = massSplit.aromaticNeat / (targetNum / 100);
+          const requiredSolvent = requiredTotal - massSplit.aromaticNeat;
+          const needed = requiredSolvent - massSplit.solventNeat;
+          if (Math.abs(needed) <= 1) {
+            neededDisplay = <span className="text-emerald-400">✓ on target</span>;
+          } else if (needed > 0) {
+            neededDisplay = <span className="text-amber-400">+{fmtGrams(needed)}</span>;
+          } else {
+            neededDisplay = <span className="text-orange-400">−{fmtGrams(Math.abs(needed))} excess</span>;
+          }
+          if (Math.abs(needed) <= 1) {
+            chip = (
+              <Badge variant="outline" className="border-emerald-700 bg-emerald-900/30 text-emerald-300">
+                Aligned
+              </Badge>
             );
-          })()}
-        </div>
-      )}
+          } else if (needed > 1) {
+            chip = (
+              <Badge variant="outline" className="border-amber-700 bg-amber-900/30 text-amber-300">
+                Needs {fmtGrams(needed)} solvent
+              </Badge>
+            );
+          } else if (needed < -1) {
+            chip = (
+              <Badge variant="outline" className="border-orange-700 bg-orange-900/30 text-orange-300">
+                Above target by {fmtGrams(Math.abs(needed))}
+              </Badge>
+            );
+          }
+        }
+
+        return (
+          <div className="mb-4 rounded-md border border-border bg-secondary/30 p-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Target</div>
+                <div className="relative">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={targetConcInput}
+                    onChange={(e) => setTargetConcInput(e.target.value)}
+                    onBlur={commitTarget}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+                    placeholder="e.g. 20"
+                    className="h-8 pr-6 text-sm font-mono"
+                    data-testid="input-target-concentration"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Actual</div>
+                <div className="h-8 flex items-center font-mono text-sm" data-testid="text-actual-concentration">
+                  {hasAnyMass ? fmtPercent(concentratePct) : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Required solvent</div>
+                <div className="h-8 flex items-center font-mono text-sm" data-testid="text-required-solvent">
+                  {neededDisplay}
+                </div>
+              </div>
+            </div>
+            {(chip || hasAnyMass) && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                {chip && <div>{chip}</div>}
+                {hasAnyMass && (
+                  <>
+                    <span>Concentrate: <span className="font-mono text-foreground">{fmtPercent(concentratePct)}</span></span>
+                    <span>Aromatic: <span className="font-mono text-foreground">{fmtGrams(massSplit.aromaticNeat)}</span></span>
+                    <span>Solvent: <span className="font-mono text-foreground">{fmtGrams(massSplit.solventNeat)}</span></span>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Ingredient table */}
       <IngredientTable
