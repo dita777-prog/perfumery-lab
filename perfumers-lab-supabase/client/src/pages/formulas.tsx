@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
@@ -1917,6 +1918,7 @@ function CreateProductionBatchDialog({
   const [selectedSourceIds, setSelectedSourceIds] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdAtDisplay, setCreatedAtDisplay] = useState<string>("");
+  const [ackNoSource, setAckNoSource] = useState(false);
 
   // Build deduction rows — for each material ingredient, resolve sources + default source.
   const deductionRows = useMemo(() => {
@@ -1954,12 +1956,25 @@ function CreateProductionBatchDialog({
     return generateBatchLabel(formula?.name || "Formula", productionBatches || []);
   }, [open, formula?.name, productionBatches]);
 
+  const missingSourceRows = useMemo(
+    () => deductionRows.filter((r) => r.sources.length === 0 && r.gramsToDeduct > 0),
+    [deductionRows],
+  );
+  const insufficientStockRows = useMemo(
+    () =>
+      deductionRows.filter(
+        (r) => r.sources.length > 0 && r.totalStock < r.gramsToDeduct && r.gramsToDeduct > 0,
+      ),
+    [deductionRows],
+  );
+
   // Reset dialog state when it opens
   useEffect(() => {
     if (!open) return;
     setProducedGrams(formula?.totalBatchGrams ? String(formula.totalBatchGrams) : "");
     setNotes("");
     setIsSubmitting(false);
+    setAckNoSource(false);
     const defaults: Record<string, string> = {};
     for (const row of deductionRows) {
       if (row.defaultSourceId) defaults[row.ingredientId] = row.defaultSourceId;
@@ -2106,14 +2121,16 @@ function CreateProductionBatchDialog({
                           </td>
                           <td className="p-2 pr-3">
                             {noSource ? (
-                              <span className="text-xs text-yellow-400">
-                                No stock source — skipped
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-500">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                No stock source — will NOT be deducted
                               </span>
                             ) : row.sources.length === 1 ? (
                               <span className="text-xs text-muted-foreground">
                                 {fmtGrams(row.sources[0].stockGrams)} available
                                 {insufficient && (
-                                  <span className="ml-2 text-red-400">
+                                  <span className="ml-2 inline-flex items-center gap-1 text-red-500 font-semibold">
+                                    <AlertTriangle className="w-3.5 h-3.5" />
                                     Insufficient stock
                                   </span>
                                 )}
@@ -2141,7 +2158,8 @@ function CreateProductionBatchDialog({
                                   </SelectContent>
                                 </Select>
                                 {insufficient && (
-                                  <span className="text-xs text-red-400">
+                                  <span className="inline-flex items-center gap-1 text-xs text-red-500 font-semibold">
+                                    <AlertTriangle className="w-3.5 h-3.5" />
                                     Insufficient stock
                                   </span>
                                 )}
@@ -2157,6 +2175,60 @@ function CreateProductionBatchDialog({
             )}
           </div>
 
+          {(missingSourceRows.length > 0 || insufficientStockRows.length > 0) && (
+            <div className="space-y-2">
+              {missingSourceRows.length > 0 && (
+                <div
+                  className="rounded-md border border-red-500/60 bg-red-500/10 p-3 text-xs"
+                  data-testid="banner-missing-source"
+                >
+                  <div className="flex items-start gap-2 text-red-500 font-semibold">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div>
+                      {missingSourceRows.length} ingredient
+                      {missingSourceRows.length === 1 ? "" : "s"} will not be deducted
+                      (no stock source):{" "}
+                      <span className="font-normal">
+                        {missingSourceRows.map((r) => r.materialName).join(", ")}
+                      </span>
+                    </div>
+                  </div>
+                  <label className="mt-2 flex items-center gap-2 text-foreground cursor-pointer">
+                    <Checkbox
+                      checked={ackNoSource}
+                      onCheckedChange={(v) => setAckNoSource(v === true)}
+                      data-testid="checkbox-ack-no-source"
+                    />
+                    <span>I understand these ingredients will not be deducted from stock</span>
+                  </label>
+                </div>
+              )}
+              {insufficientStockRows.length > 0 && (
+                <div
+                  className="rounded-md border border-red-500/60 bg-red-500/10 p-3 text-xs text-red-500"
+                  data-testid="banner-insufficient-stock"
+                >
+                  <div className="flex items-start gap-2 font-semibold">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div>
+                      {insufficientStockRows.length} ingredient
+                      {insufficientStockRows.length === 1 ? "" : "s"} have insufficient
+                      stock:{" "}
+                      <span className="font-normal">
+                        {insufficientStockRows
+                          .map(
+                            (r) =>
+                              `${r.materialName} (need ${fmtGrams(r.gramsToDeduct)}g, have ${fmtGrams(r.totalStock)}g)`,
+                          )
+                          .join(", ")}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex justify-end gap-2">
             <Button
               variant="outline"
@@ -2168,7 +2240,11 @@ function CreateProductionBatchDialog({
             </Button>
             <Button
               onClick={handleConfirm}
-              disabled={isSubmitting || !producedGrams}
+              disabled={
+                isSubmitting ||
+                !producedGrams ||
+                (missingSourceRows.length > 0 && !ackNoSource)
+              }
               data-testid="button-confirm-production-batch"
             >
               {isSubmitting ? "Creating…" : "Confirm & Create Batch"}
