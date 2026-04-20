@@ -14,10 +14,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useToast } from "@/hooks/use-toast";
 import { fmtNum, fmtGrams, fmtPercent, postJson, patchJson, deleteJson, recalcPercents, calcPyramidBreakdown, scaleToTotalWeight, scaleByFactor, scaleToAbsolutePercent, scalePercentByFactor, isSolventIngredient, calcConcentratePercent, splitAromaticSolventMass } from "@/lib/api";
 
+/** Coerce any value to a string safely (Supabase NUMERIC can return as number or string). */
+function asString(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  return typeof v === "string" ? v : String(v);
+}
+
 /** Parse European-style number input (accept both comma and dot as decimal separator) */
-function parseEuroInput(val: string): number {
-  // Replace comma with dot for parsing
-  const normalized = val.replace(",", ".");
+function parseEuroInput(val: unknown): number {
+  // Replace comma with dot for parsing; coerce non-strings (Supabase may return number for NUMERIC)
+  const normalized = asString(val).replace(",", ".");
   return parseFloat(normalized);
 }
 
@@ -185,7 +191,7 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
     const [nameValue, setNameValue] = useState(formula.name);
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesText, setNotesText] = useState(formula.formulaNotes || "");
-  const [targetConcInput, setTargetConcInput] = useState<string>(formula.intendedConcentrationPercent ?? "");
+  const [targetConcInput, setTargetConcInput] = useState<string>(asString(formula.intendedConcentrationPercent));
 
   const { data: ingredients = [] } = useQuery<any[]>({ queryKey: ["/api/formulas", formula.id, "ingredients"] });
     const nameInputRef = useRef<HTMLInputElement>(null);
@@ -198,11 +204,11 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
   const { data: productionBatches = [] } = useQuery<any[]>({ queryKey: ["/api/production-batches"] });
 
   // Reset notes when formula changes
-  useEffect(() => { setNotesText(formula.formulaNotes || ""); setEditingNotes(false); setNameValue(formula.name); setEditingName(false); setTargetConcInput(formula.intendedConcentrationPercent ?? ""); }, [formula.id]);
+  useEffect(() => { setNotesText(formula.formulaNotes || ""); setEditingNotes(false); setNameValue(formula.name); setEditingName(false); setTargetConcInput(asString(formula.intendedConcentrationPercent)); }, [formula.id]);
 
   // Keep target input in sync if the formula record updates externally (e.g. scaling).
   useEffect(() => {
-    setTargetConcInput(formula.intendedConcentrationPercent ?? "");
+    setTargetConcInput(asString(formula.intendedConcentrationPercent));
   }, [formula.intendedConcentrationPercent]);
 
   const updateTargetMut = useMutation({
@@ -213,7 +219,7 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
   });
 
   // ─── Target concentration: inline validation + debounced autosave ───
-  const targetRaw = targetConcInput.trim();
+  const targetRaw = asString(targetConcInput).trim();
   const targetParsed = targetRaw === "" ? NaN : parseEuroInput(targetRaw);
   const targetIsValid =
     targetRaw === "" || (!isNaN(targetParsed) && targetParsed > 0 && targetParsed <= 100);
@@ -224,14 +230,14 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
 
   const computeNormalized = useCallback((raw: string): string | null | undefined => {
     // undefined = no-op (same as stored), null = clear, string = new value
-    const stored = formula.intendedConcentrationPercent ?? "";
+    const stored = asString(formula.intendedConcentrationPercent);
     if (raw === "") {
       return stored === "" ? undefined : null;
     }
     const n = parseEuroInput(raw);
     if (isNaN(n) || n <= 0 || n > 100) return undefined;
     const normalized = n.toFixed(2);
-    if (normalized === String(stored)) return undefined;
+    if (normalized === stored) return undefined;
     return normalized;
   }, [formula.intendedConcentrationPercent]);
 
@@ -542,7 +548,7 @@ updateStatusMut.mutate({ status: newStatus });
 
       {/* Concentration panel — live formulation calculator */}
       {(() => {
-        const targetNum = parseFloat(targetConcInput || formula.intendedConcentrationPercent || "0");
+        const targetNum = parseFloat(asString(targetConcInput) || asString(formula.intendedConcentrationPercent) || "0");
         const hasTarget = !!targetNum && !isNaN(targetNum) && targetNum > 0;
         const hasAromatic = massSplit.aromaticNeat > 0;
         const hasAnyMass = hasAromatic || massSplit.solventNeat > 0;
@@ -1256,7 +1262,7 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
   const computedConcentration = calcConcentratePercent(ingredients, materials);
   const currentConcentration = computedConcentration > 0
     ? computedConcentration
-    : parseFloat(formula.intendedConcentrationPercent || "0");
+    : parseFloat(asString(formula.intendedConcentrationPercent) || "0");
   const maxPercentFactor = currentConcentration > 0 ? (100 / currentConcentration) : 1;
 
   // Determine which method is active (last typed into)
