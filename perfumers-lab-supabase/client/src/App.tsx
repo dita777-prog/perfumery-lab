@@ -3,6 +3,7 @@ import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useState } from "react";
 import {
   FlaskConical, Package, Users, TestTube, Lightbulb,
@@ -81,19 +82,21 @@ function AppLayout() {
 
       {/* Main content */}
       <main className="flex-1 overflow-y-auto">
-        <Switch>
-          <Route path="/" component={MaterialsPage} />
-          <Route path="/formulas" component={FormulasPage} />
-          <Route path="/formulas/:id" component={FormulasPage} />
-          <Route path="/suppliers" component={SuppliersPage} />
-          <Route path="/tests" component={TestsPage} />
-          <Route path="/decisions" component={DecisionsPage} />
-          <Route path="/stock" component={StockPage} />
-          <Route path="/search" component={SearchPage} />
-          <Route path="/archive" component={ArchivePage} />
-          <Route path="/settings" component={SettingsPage} />
-          <Route component={NotFound} />
-        </Switch>
+        <ErrorBoundary>
+          <Switch>
+            <Route path="/" component={MaterialsPage} />
+            <Route path="/formulas" component={FormulasPage} />
+            <Route path="/formulas/:id" component={FormulasPage} />
+            <Route path="/suppliers" component={SuppliersPage} />
+            <Route path="/tests" component={TestsPage} />
+            <Route path="/decisions" component={DecisionsPage} />
+            <Route path="/stock" component={StockPage} />
+            <Route path="/search" component={SearchPage} />
+            <Route path="/archive" component={ArchivePage} />
+            <Route path="/settings" component={SettingsPage} />
+            <Route component={NotFound} />
+          </Switch>
+        </ErrorBoundary>
       </main>
 
       {/* Mobile overlay */}

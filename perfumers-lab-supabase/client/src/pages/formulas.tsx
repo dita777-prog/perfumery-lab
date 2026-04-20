@@ -1310,6 +1310,10 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
 
   const applyMut = useMutation({
     mutationFn: async (scaledIngs: any[]) => {
+      const missingId = scaledIngs.find((ing) => !ing?.id);
+      if (missingId) {
+        throw new Error("Cannot scale: one or more ingredients have no ID. Try closing the dialog and reopening it.");
+      }
       for (const ing of scaledIngs) {
         await patchJson(`/api/formula-ingredients/${ing.id}`, {
           gramsAsWeighed: ing.gramsAsWeighed,
@@ -1320,7 +1324,7 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
       // computed concentrate % so the Scale dialog's baseline and the
       // deviation warning stay in sync after scaling.
       const newConcentration = calcConcentratePercent(scaledIngs, materials);
-      if (newConcentration > 0) {
+      if (Number.isFinite(newConcentration) && newConcentration > 0) {
         await patchJson(`/api/formulas/${formula.id}`, {
           intendedConcentrationPercent: newConcentration.toFixed(2),
         });
@@ -1331,6 +1335,13 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
       queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
       onOpenChange(false);
       toast({ title: "Scaling applied" });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to apply scaling",
+        description: err?.message || "Unknown error",
+        variant: "destructive",
+      });
     },
   });
 
