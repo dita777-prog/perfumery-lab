@@ -2146,6 +2146,7 @@ function CreateProductionBatchDialog({
                       <th className="text-left p-2 pl-3">Material</th>
                       <th className="text-right p-2">Weigh (g)</th>
                       <th className="text-right p-2">Neat (g)</th>
+                      <th className="text-right p-2">Deduct (g)</th>
                       <th className="text-right p-2">Stock (g)</th>
                       <th className="text-left p-2 pr-3">Source</th>
                     </tr>
@@ -2169,6 +2170,13 @@ function CreateProductionBatchDialog({
                           </td>
                           <td className="text-right p-2 font-mono text-xs text-muted-foreground">
                             {fmtGrams(row.neatGrams)}
+                          </td>
+                          <td
+                            className={`text-right p-2 font-mono text-xs ${
+                              row.isDiluted ? "text-amber-400 font-semibold" : ""
+                            }`}
+                          >
+                            {fmtGrams(row.gramsToDeduct)}
                           </td>
                           <td
                             className={`text-right p-2 font-mono text-xs ${
