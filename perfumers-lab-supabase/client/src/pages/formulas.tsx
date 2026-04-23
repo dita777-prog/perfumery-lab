@@ -1970,6 +1970,7 @@ function CreateProductionBatchDialog({
           materialName: material?.name || "Unknown",
           isDiluted: !!ing.dilutionId,
           gramsToDeduct: stockDeductionGrams(ing),
+          gramsToWeigh: weighedGramsOf(ing),
           neatGrams: neatGramsOf(ing),
           sources: sourcesForMat,
           totalStock,
@@ -2045,11 +2046,11 @@ function CreateProductionBatchDialog({
         const sourceId = selectedSourceIds[row.ingredientId];
         if (!sourceId) continue; // skip if no source available
         if (row.gramsToDeduct <= 0) continue;
-        // For diluted ingredients the deducted mass includes carrier solvent,
-        // so annotate the movement with the neat aromatic contribution for
-        // downstream traceability.
+        // Stock tracks neat material only, so deductions are always in neat
+        // grams. For diluted ingredients, annotate the movement with the
+        // physically-weighed mass for downstream traceability.
         const note = row.isDiluted
-          ? `Auto-deducted for batch ${batchLabel} — diluted (${fmtGrams(row.neatGrams)} neat)`
+          ? `Auto-deducted for batch ${batchLabel} — diluted (weighed ${fmtGrams(row.gramsToWeigh)})`
           : `Auto-deducted for batch ${batchLabel}`;
         await postJson("/api/stock-movements", {
           materialSourceId: sourceId,
@@ -2164,7 +2165,7 @@ function CreateProductionBatchDialog({
                             )}
                           </td>
                           <td className="text-right p-2 font-mono text-xs">
-                            {fmtGrams(row.gramsToDeduct)}
+                            {fmtGrams(row.gramsToWeigh)}
                           </td>
                           <td className="text-right p-2 font-mono text-xs text-muted-foreground">
                             {fmtGrams(row.neatGrams)}

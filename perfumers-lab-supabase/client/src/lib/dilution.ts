@@ -60,12 +60,12 @@ export function neatMultiplierFor(
 }
 
 /**
- * Stock deduction amount: always the physically-weighed mass. You consume
- * the diluted material from stock at its weighed value — the dilution's
- * neat content is an accounting fact, not a stock unit.
+ * Stock deduction amount: the pure aromatic (neat) mass. material_sources
+ * tracks neat material only — the carrier/solvent in a dilution is not
+ * stock, so deductions must use neatGrams, not gramsAsWeighed.
  */
 export function stockDeductionGrams(ing: IngredientLike | null | undefined): number {
-  return weighedGramsOf(ing);
+  return neatGramsOf(ing);
 }
 
 /** Solvent mass carried into the formula by this ingredient's dilution. */
