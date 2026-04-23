@@ -54,6 +54,7 @@ const urlToTable: Record<string, string> = {
   "/api/decisions": "decisions",
   "/api/stock-movements": "stock_movements",
   "/api/production-batches": "production_batches",
+  "/api/formula-inventory-movements": "formula_inventory_movements",
   "/api/supplier-price-history": "supplier_price_history",
   "/api/attachments": "attachments",
 };

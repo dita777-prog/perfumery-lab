@@ -7,7 +7,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useState } from "react";
 import {
   FlaskConical, Package, Users, TestTube, Lightbulb,
-  BarChart3, Settings, Search, Menu, X, Boxes, Archive
+  BarChart3, Settings, Search, Menu, X, Boxes, Archive, Droplet
 } from "lucide-react";
 import MaterialsPage from "./pages/materials";
 import FormulasPage from "./pages/formulas";
@@ -15,6 +15,7 @@ import SuppliersPage from "./pages/suppliers";
 import TestsPage from "./pages/tests";
 import DecisionsPage from "./pages/decisions";
 import StockPage from "./pages/stock";
+import FormulaInventoryPage from "./pages/formula-inventory";
 import SettingsPage from "./pages/settings";
 import SearchPage from "./pages/search";
 import ArchivePage from "./pages/archive";
@@ -31,6 +32,7 @@ function AppLayout() {
     { href: "/tests", icon: TestTube, label: "Tests" },
     { href: "/decisions", icon: Lightbulb, label: "Decisions" },
     { href: "/stock", icon: Boxes, label: "Stock" },
+    { href: "/formula-inventory", icon: Droplet, label: "Formula Inventory" },
     { href: "/search", icon: Search, label: "Search" },
     { href: "/archive", icon: Archive, label: "Archive" },
     { href: "/settings", icon: Settings, label: "Settings" },
@@ -91,6 +93,7 @@ function AppLayout() {
             <Route path="/tests" component={TestsPage} />
             <Route path="/decisions" component={DecisionsPage} />
             <Route path="/stock" component={StockPage} />
+            <Route path="/formula-inventory" component={FormulaInventoryPage} />
             <Route path="/search" component={SearchPage} />
             <Route path="/archive" component={ArchivePage} />
             <Route path="/settings" component={SettingsPage} />

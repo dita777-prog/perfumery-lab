@@ -2042,6 +2042,7 @@ function CreateProductionBatchDialog({
       });
 
       let deductionCount = 0;
+      let totalBatchCost = 0;
       for (const row of deductionRows) {
         const sourceId = selectedSourceIds[row.ingredientId];
         if (!sourceId) continue; // skip if no source available
@@ -2062,12 +2063,39 @@ function CreateProductionBatchDialog({
           notes: note,
         });
         deductionCount += 1;
+
+        // Accumulate cost based on neat grams consumed from this source
+        const src = materialSources.find((ms: any) => ms.id === sourceId);
+        const pricePerGram = parseFloat(src?.pricePerGram || src?.price_per_gram || "0") || 0;
+        totalBatchCost += row.neatGrams * pricePerGram;
+      }
+
+      // Record formula inventory production_in movement.
+      // Raw materials are already deducted — this is additive. If the insert
+      // fails, log a warning but don't block the batch creation.
+      const producedGramsNum = parseFloat(producedGrams) || 0;
+      if (producedGramsNum > 0) {
+        try {
+          const costPerGram = totalBatchCost > 0 ? totalBatchCost / producedGramsNum : 0;
+          await postJson("/api/formula-inventory-movements", {
+            formulaId: formula.id,
+            movementType: "production_in",
+            gramsDelta: String(producedGramsNum),
+            costPerGram: costPerGram > 0 ? String(costPerGram) : null,
+            totalCost: totalBatchCost > 0 ? String(totalBatchCost) : null,
+            productionBatchId: batch.id,
+            notes: `Auto-created from batch ${batchLabel}`,
+          });
+        } catch (err: any) {
+          console.warn("Failed to insert formula_inventory_movements production_in:", err?.message || err);
+        }
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/production-batches"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stock-movements", "enriched"] });
       queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/formula-inventory-movements"] });
 
       toast({ title: `Batch ${batchLabel} created — ${deductionCount} materials deducted` });
       onOpenChange(false);
