@@ -1,6 +1,7 @@
 import { queryClient } from "./queryClient";
 import { supabase } from "./supabase";
 import type { Material, FormulaIngredient } from "@shared/schema";
+import { neatGramsOf, weighedGramsOf } from "./dilution";
 
 // Subset of FormulaIngredient fields the solvent helpers actually read.
 // Accepting a partial shape keeps the helpers usable with preview objects
@@ -241,11 +242,11 @@ export function isSolventIngredient(
 }
 
 function ingNeat(ing: SolventIngredient): number {
-  return parseFloat((ing?.neatGrams ?? ing?.gramsAsWeighed ?? "0") as string);
+  return neatGramsOf(ing);
 }
 
 function ingWeighed(ing: SolventIngredient): number {
-  return parseFloat((ing?.gramsAsWeighed ?? "0") as string);
+  return weighedGramsOf(ing);
 }
 
 // Sum masses split by solvent flag. Returns neat-grams sums.

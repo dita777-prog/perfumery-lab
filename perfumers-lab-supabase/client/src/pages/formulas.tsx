@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { fmtNum, fmtGrams, fmtPercent, postJson, patchJson, deleteJson, recalcPercents, calcPyramidBreakdown, scaleToTotalWeight, scaleByFactor, scaleToAbsolutePercent, scalePercentByFactor, isSolventIngredient, calcConcentratePercent, splitAromaticSolventMass } from "@/lib/api";
+import { neatGramsOf, weighedGramsOf, dilutionSolventGrams, neatMultiplierFor, stockDeductionGrams } from "@/lib/dilution";
 
 /** Coerce any value to a string safely (Supabase NUMERIC can return as number or string). */
 function asString(v: unknown): string {
@@ -296,8 +297,8 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
   }, [targetRaw, targetIsValid, runSave]);
 
   const enriched = recalcPercents(ingredients, materials);
-  const totalWeighed = ingredients.reduce((s: number, i: any) => s + parseFloat(i.gramsAsWeighed || "0"), 0);
-  const totalNeat = ingredients.reduce((s: number, i: any) => s + parseFloat((i.neatGrams != null ? i.neatGrams : i.gramsAsWeighed) || "0"), 0);
+  const totalWeighed = ingredients.reduce((s: number, i: any) => s + weighedGramsOf(i), 0);
+  const totalNeat = ingredients.reduce((s: number, i: any) => s + neatGramsOf(i), 0);
   // Sum only aromatic percentages for the warning; solvents are shown as
   // % of the whole batch so they shouldn't count toward the 100% total.
   const totalPercent = enriched.reduce((s: number, i: any) => {
@@ -326,7 +327,7 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
     for (const solventIng of solventIngredients) {
       const solventMat = materials.find((m: any) => m.id === solventIng.materialId);
       const solventName = solventMat?.name || "Unknown";
-      const weighedGrams = parseFloat(solventIng.gramsAsWeighed || "0");
+      const weighedGrams = weighedGramsOf(solventIng);
 
       // Sum solvent contributed by dilutions of other ingredients
       let contributedBySolvent = 0;
@@ -340,10 +341,11 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
         // Fallback: match by name if solventMaterialId is not set
         const dilSolventNameMatches = !dil.solventMaterialId && dil.solventName && (() => { const etoh = ["etoh","ethanol","alcohol","perfumers alcohol"]; const dpg = ["dpg","dipropylene glycol"]; const ipm = ["ipm","isopropyl myristate"]; const sn = solventName.toLowerCase(); const dn = dil.solventName.toLowerCase(); if (sn.includes(dn) || dn.includes(sn)) return true; for (const group of [etoh, dpg, ipm]) { if (group.some(a => sn.includes(a)) && group.some(a => dn.includes(a))) return true; } return false; })();
         if (!dilSolventMatches && !dilSolventNameMatches) continue;
-        // Solvent contributed = weighed grams * (1 - dilutionPercent/100)
-        const dilPercent = parseFloat(dil.dilutionPercent || "0");
-        const ingWeighed = parseFloat(ing.gramsAsWeighed || "0");
-        contributedBySolvent += ingWeighed * (1 - dilPercent / 100);
+        // Solvent contributed by this diluted ingredient = weighed - neat.
+        // Derived from neatGrams (persisted per-ingredient) rather than the
+        // dilution's stored percent, so the number stays correct even if the
+        // dilution row's numbers drift.
+        contributedBySolvent += dilutionSolventGrams(ing);
       }
 
       result.push({
@@ -839,11 +841,7 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
     const g = parseEuroInput(gramsValue);
     if (isNaN(g) || g < 0) return;
     const ing = ingredients.find((i: any) => i.id === ingId);
-    let neatMult = 1;
-    if (ing?.dilutionId) {
-      const dil = dilutions.find((d: any) => d.id === ing.dilutionId);
-      neatMult = parseFloat(dil?.neatMultiplier || "1");
-    }
+    const neatMult = neatMultiplierFor(ing, dilutions);
     updateIngMut.mutate({
       id: ingId,
       data: { gramsAsWeighed: String(g), neatGrams: String(g * neatMult) }
@@ -854,14 +852,11 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
   function handleDilutionChange(ingId: string, dilutionId: string | null) {
     const ing = ingredients.find((i: any) => i.id === ingId);
     if (!ing) return;
-    const g = parseFloat(ing.gramsAsWeighed || "0");
-    let neatMult = 1;
-    let sourceType = "material";
-    if (dilutionId) {
-      const dil = dilutions.find((d: any) => d.id === dilutionId);
-      neatMult = parseFloat(dil?.neatMultiplier || "1");
-      sourceType = ing.sourceFormulaId ? "formula" : "material";
-    }
+    const g = weighedGramsOf(ing);
+    const neatMult = neatMultiplierFor({ dilutionId }, dilutions);
+    const sourceType = dilutionId
+      ? (ing.sourceFormulaId ? "formula" : "material")
+      : "material";
     updateIngMut.mutate({
       id: ingId,
       data: {
@@ -964,14 +959,14 @@ className={ (matDilutions.length > 0 || ing.sourceFormulaId) ? 'cursor-pointer h
                   ) : (
                     <span
                       className="font-mono text-xs cursor-pointer hover:text-[hsl(183,70%,50%)] hover:underline decoration-dotted"
-                      onClick={() => { setEditingGrams(ing.id); setGramsValue(parseFloat(ing.gramsAsWeighed || "0").toFixed(3).replace(".", ",")); }}
+                      onClick={() => { setEditingGrams(ing.id); setGramsValue(weighedGramsOf(ing).toFixed(3).replace(".", ",")); }}
                     >
-                      {fmtGrams(ing.gramsAsWeighed)}
+                      {fmtGrams(weighedGramsOf(ing))}
                     </span>
                   )}
                 </td>
 
-                <td className="text-right p-2 font-mono text-xs">{fmtGrams(ing.neatGrams || ing.gramsAsWeighed)}</td>
+                <td className="text-right p-2 font-mono text-xs">{fmtGrams(neatGramsOf(ing))}</td>
                 <td className="text-right p-2 pr-3 font-mono text-xs">{fmtPercent(ing.percentInFormula)}</td>
               </tr>
             );
@@ -1256,7 +1251,7 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
     if (open) { setTotalWeightVal(""); setFactorVal(""); setAbsPercentVal(""); setPercentFactorVal(""); }
   }, [open]);
 
-  const currentTotal = ingredients.reduce((s: number, i: any) => s + parseFloat(i.gramsAsWeighed || "0"), 0);
+  const currentTotal = ingredients.reduce((s: number, i: any) => s + weighedGramsOf(i), 0);
   // Derive current concentration from actual aromatic vs. solvent mass so
   // solvent-aware scaling works even if intendedConcentrationPercent is stale.
   const computedConcentration = calcConcentratePercent(ingredients, materials);
@@ -1508,12 +1503,21 @@ function ScalePreviewTable({ preview, getIngredientName }: { preview: any[]; get
   return (
     <div className="bg-secondary/50 rounded p-2 mt-3 max-h-48 overflow-y-auto">
       <table className="w-full text-xs">
+        <thead>
+          <tr className="text-muted-foreground">
+            <th className="w-6"></th>
+            <th className="text-left font-normal"></th>
+            <th className="text-right font-normal py-1">Weigh</th>
+            <th className="text-right font-normal py-1 pl-2">Neat</th>
+          </tr>
+        </thead>
         <tbody>
           {preview.map((p: any, i: number) => (
             <tr key={p.id || i} className="border-b border-border/30">
               <td className="py-1 text-muted-foreground w-6">{i + 1}</td>
               <td className="py-1 truncate">{getIngredientName(p)}</td>
-              <td className="py-1 text-right font-mono">{fmtGrams(p.gramsAsWeighed)}</td>
+              <td className="py-1 text-right font-mono">{fmtGrams(weighedGramsOf(p))}</td>
+              <td className="py-1 pl-2 text-right font-mono text-muted-foreground">{fmtGrams(neatGramsOf(p))}</td>
             </tr>
           ))}
         </tbody>
@@ -1938,6 +1942,10 @@ function CreateProductionBatchDialog({
   const [ackNoSource, setAckNoSource] = useState(false);
 
   // Build deduction rows — for each material ingredient, resolve sources + default source.
+  // For dilution-backed ingredients we deduct the weighed mass (what you
+  // physically consume from stock) while also surfacing the neat aromatic
+  // mass so the user can see how much pure material actually lands in the
+  // batch.
   const deductionRows = useMemo(() => {
     return ingredients
       .filter((ing: any) => ing.sourceType === "material" && ing.materialId)
@@ -1960,13 +1968,26 @@ function CreateProductionBatchDialog({
           ingredientId: ing.id,
           materialId: ing.materialId,
           materialName: material?.name || "Unknown",
-          gramsToDeduct: parseFloat(ing.gramsAsWeighed || "0"),
+          isDiluted: !!ing.dilutionId,
+          gramsToDeduct: stockDeductionGrams(ing),
+          neatGrams: neatGramsOf(ing),
           sources: sourcesForMat,
           totalStock,
           defaultSourceId: defaultSource?.id || null,
         };
       });
   }, [ingredients, materials, materialSources]);
+
+  // Total aromatic (neat) mass in this batch, summed across non-solvent
+  // ingredients. Useful for traceability and shown alongside the physical
+  // produced grams in the dialog header.
+  const totalNeatGrams = useMemo(() => {
+    return ingredients.reduce((sum: number, ing: any) => {
+      const mat = materials.find((m: any) => m.id === ing.materialId);
+      if (mat?.treatAsSolvent) return sum;
+      return sum + neatGramsOf(ing);
+    }, 0);
+  }, [ingredients, materials]);
 
   const batchLabel = useMemo(() => {
     if (!open) return "";
@@ -2024,6 +2045,12 @@ function CreateProductionBatchDialog({
         const sourceId = selectedSourceIds[row.ingredientId];
         if (!sourceId) continue; // skip if no source available
         if (row.gramsToDeduct <= 0) continue;
+        // For diluted ingredients the deducted mass includes carrier solvent,
+        // so annotate the movement with the neat aromatic contribution for
+        // downstream traceability.
+        const note = row.isDiluted
+          ? `Auto-deducted for batch ${batchLabel} — diluted (${fmtGrams(row.neatGrams)} neat)`
+          : `Auto-deducted for batch ${batchLabel}`;
         await postJson("/api/stock-movements", {
           materialSourceId: sourceId,
           movementType: "production",
@@ -2031,7 +2058,7 @@ function CreateProductionBatchDialog({
           batchLabel,
           productionBatchId: batch.id,
           relatedFormulaId: formula.id,
-          notes: `Auto-deducted for batch ${batchLabel}`,
+          notes: note,
         });
         deductionCount += 1;
       }
@@ -2086,6 +2113,12 @@ function CreateProductionBatchDialog({
                 data-testid="input-produced-grams"
               />
             </div>
+            <div>
+              <div className="text-muted-foreground">Aromatic neat</div>
+              <div className="font-mono" data-testid="text-aromatic-neat-grams">
+                {fmtGrams(totalNeatGrams)}
+              </div>
+            </div>
           </div>
 
           <div>
@@ -2110,7 +2143,8 @@ function CreateProductionBatchDialog({
                   <thead>
                     <tr className="border-b border-border text-xs text-muted-foreground">
                       <th className="text-left p-2 pl-3">Material</th>
-                      <th className="text-right p-2">Deduct (g)</th>
+                      <th className="text-right p-2">Weigh (g)</th>
+                      <th className="text-right p-2">Neat (g)</th>
                       <th className="text-right p-2">Stock (g)</th>
                       <th className="text-left p-2 pr-3">Source</th>
                     </tr>
@@ -2121,9 +2155,19 @@ function CreateProductionBatchDialog({
                       const insufficient = !noSource && row.totalStock < row.gramsToDeduct;
                       return (
                         <tr key={row.ingredientId} className="border-b border-border/30">
-                          <td className="p-2 pl-3">{row.materialName}</td>
+                          <td className="p-2 pl-3">
+                            {row.materialName}
+                            {row.isDiluted && (
+                              <Badge variant="outline" className="ml-1 text-[9px] text-[hsl(183,70%,50%)] border-[hsl(183,70%,36%)]/40">
+                                diluted
+                              </Badge>
+                            )}
+                          </td>
                           <td className="text-right p-2 font-mono text-xs">
                             {fmtGrams(row.gramsToDeduct)}
+                          </td>
+                          <td className="text-right p-2 font-mono text-xs text-muted-foreground">
+                            {fmtGrams(row.neatGrams)}
                           </td>
                           <td
                             className={`text-right p-2 font-mono text-xs ${

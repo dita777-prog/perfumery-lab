@@ -9,6 +9,7 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { patchJson, recalcPercents, fmtGrams, fmtPercent, fmtNum } from "@/lib/api";
+import { neatGramsOf, weighedGramsOf } from "@/lib/dilution";
 
 export default function ArchivePage() {
   const { toast } = useToast();
@@ -197,12 +198,11 @@ function ArchivedFormulaView({
 
   const enriched = recalcPercents(ingredients);
   const totalWeighed = ingredients.reduce(
-    (s: number, i: any) => s + parseFloat(i.gramsAsWeighed || "0"),
+    (s: number, i: any) => s + weighedGramsOf(i),
     0
   );
   const totalNeat = ingredients.reduce(
-    (s: number, i: any) =>
-      s + parseFloat((i.neatGrams != null ? i.neatGrams : i.gramsAsWeighed) || "0"),
+    (s: number, i: any) => s + neatGramsOf(i),
     0
   );
   const totalPercent = enriched.reduce(
@@ -305,10 +305,10 @@ function ArchivedFormulaView({
                   </td>
                   <td className="text-center p-2 font-mono text-xs">{dilutionLabel(ing)}</td>
                   <td className="text-right p-2 font-mono text-xs">
-                    {fmtGrams(ing.gramsAsWeighed)}
+                    {fmtGrams(weighedGramsOf(ing))}
                   </td>
                   <td className="text-right p-2 font-mono text-xs">
-                    {fmtGrams(ing.neatGrams || ing.gramsAsWeighed)}
+                    {fmtGrams(neatGramsOf(ing))}
                   </td>
                   <td className="text-right p-2 pr-3 font-mono text-xs">
                     {fmtPercent(ing.percentInFormula)}
