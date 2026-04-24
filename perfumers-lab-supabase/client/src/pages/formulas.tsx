@@ -1970,14 +1970,21 @@ function CreateProductionBatchDialog({
   const [producedGrams, setProducedGrams] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [selectedSourceIds, setSelectedSourceIds] = useState<Record<string, string>>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);  const [useFormulaInventory, setUseFormulaInventory] = useState(false);  const [finalizationSourceId, setFinalizationSourceId] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [useFormulaInventory, setUseFormulaInventory] = useState(false);
+  const [finalizationSourceId, setFinalizationSourceId] = useState<string>("");
   const [createdAtDisplay, setCreatedAtDisplay] = useState<string>("");
-  const [ackNoSource, setAckNoSource] = useState(false);    // Finalization mode: all ingredients are sub-formulas (no raw materials)   // In this mode, no raw material stock deductions happen — only formula inventory transfer   const formulaRole = String(formula?.formulaRole || formula?.formula_role || "").toLowerCase();  const categoryName = String(formula?.categoryName || formula?.category_name || "").toLowerCase();  const isFinalFormula = formulaRole === "final" || categoryName === "products" || categoryName === "final formulas";  const isFinalizationMode = isFinalFormula && useFormulaInventory; // replaced  
-  // In this mode, no raw material stock deductions happen - only formula inventory transfer
-  const formulaRole = String(formula?.formulaRole || formula?.formula_role || "").toLowerCase();
-  const categoryName = String(formula?.categoryName || formula?.category_name || "").toLowerCase();
-  const isFinalFormula = formulaRole === "final" || categoryName === "products" || categoryName === "final formulas";
-    const isFinalizationMode = isFinalFormula;
+  const [ackNoSource, setAckNoSource] = useState(false);
+  // Finalization mode: PRODUCTS-category / final-role formulas. Sub-formula
+  // ingredients deduct from formula_inventory (consumption_out); raw material
+  // ingredients still deduct from raw material stock — no duplicate deductions.
+  const formulaRole = String((formula as any)?.formulaRole || (formula as any)?.formula_role || "").toLowerCase();
+  const categoryName = String((formula as any)?.categoryName || (formula as any)?.category_name || (formula as any)?.formula_categories?.name || "").toLowerCase();
+  const isFinalFormula =
+    formulaRole === "final" ||
+    categoryName.includes("product") ||
+    categoryName.includes("final");
+  const isFinalizationMode = isFinalFormula;
   // Fetch formula inventory movements directly inside the dialog, overriding
   // the global staleTime: Infinity. refetchOnMount: "always" guarantees a
   // fresh fetch each time the dialog opens, so production_in rows added by
@@ -2152,6 +2159,9 @@ const insufficientStockRows = useMemo(
       let deductionCount = 0;
       let totalBatchCost = 0;
       let subFormulaDeductionCount = 0;
+      // Final/product formulas: source_type='material' rows still deduct from
+      // raw material stock here, while source_type='formula' rows below deduct
+      // from formula_inventory as consumption_out — no duplicate deductions.
       for (const row of deductionRows) {
         const sourceId = selectedSourceIds[row.ingredientId];
         if (!sourceId) continue; // skip if no source available
@@ -2243,7 +2253,7 @@ const insufficientStockRows = useMemo(
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!isSubmitting) onOpenChange(v); }}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
             <DialogTitle>Create Production Batch{isFinalizationMode && " (Finalization)"}</DialogTitle>
             {isFinalFormula && (
@@ -2301,7 +2311,7 @@ const insufficientStockRows = useMemo(
                 No ingredients to deduct.
               </div>
             ) : (
-              <div className="bg-card rounded-lg border border-border overflow-hidden">
+              <div className="bg-card rounded-lg border border-border overflow-hidden max-h-[40vh] overflow-y-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-xs text-muted-foreground">
@@ -2499,7 +2509,7 @@ const insufficientStockRows = useMemo(
             </div>
           )}
 
-          <div className="flex justify-end gap-2">
+          <div className="sticky bottom-0 bg-card pt-3 border-t border-border flex justify-end gap-2">
             <Button
               variant="outline"
               onClick={() => onOpenChange(false)}
