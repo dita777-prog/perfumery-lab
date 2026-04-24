@@ -1972,7 +1972,7 @@ function CreateProductionBatchDialog({
   const [selectedSourceIds, setSelectedSourceIds] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdAtDisplay, setCreatedAtDisplay] = useState<string>("");
-  const [ackNoSource, setAckNoSource] = useState(false);
+  const [ackNoSource, setAckNoSource] = useState(false);    // Finalization mode: all ingredients are sub-formulas (no raw materials)   // In this mode, no raw material stock deductions happen — only formula inventory transfer   const isFinalizationMode = ingredients.length > 0 && ingredients.every((ing: any) => ing.sourceType === "formula" && ing.sourceFormulaId);
 
   // Fetch formula inventory movements directly inside the dialog, overriding
   // the global staleTime: Infinity. refetchOnMount: "always" guarantees a
@@ -2115,7 +2115,7 @@ function CreateProductionBatchDialog({
     setProducedGrams(formula?.totalBatchGrams ? String(formula.totalBatchGrams) : "");
     setNotes("");
     setIsSubmitting(false);
-    setAckNoSource(false);
+    setAckNoSource(false);   setUseFormulaInventory(false);   setFinalizationSourceId("");
     const defaults: Record<string, string> = {};
     for (const row of deductionRows) {
       if (row.defaultSourceId) defaults[row.ingredientId] = row.defaultSourceId;
@@ -2239,7 +2239,7 @@ function CreateProductionBatchDialog({
     <Dialog open={open} onOpenChange={(v) => { if (!isSubmitting) onOpenChange(v); }}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Create Production Batch</DialogTitle>
+          <DialogTitle>Create Production Batch{isFinalizationMode && " (Finalization)"}</DialogTitle>           </DialogHeader>           {/* Finalization mode toggle */}           <div className="rounded-md border border-[hsl(183,70%,40%)] bg-[hsl(183,70%,10%)] p-3 text-xs flex flex-col gap-2" data-testid="panel-finalization">             <label className="flex items-center gap-2 cursor-pointer font-medium text-[hsl(183,70%,70%)]">               <input type="checkbox" checked={useFormulaInventory} onChange={e => { setUseFormulaInventory(e.target.checked); if (!e.target.checked) setFinalizationSourceId(""); }} className="accent-[hsl(183,70%,50%)]"/>               Finalization batch — deduct from formula inventory (not raw material stock)             </label>             {useFormulaInventory && (               <div className="flex flex-col gap-1">                 <p className="text-muted-foreground text-[11px]">Select the source PRODUCTION formula whose batch inventory will be consumed:</p>                 <select                   value={finalizationSourceId}                   onChange={e => setFinalizationSourceId(e.target.value)}                   className="bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"                 >                   <option value="">-- select source formula --</option>                   {allFormulas.filter((f: any) => f.id !== formula.id).map((f: any) => (                     <option key={f.id} value={f.id}>{f.name}</option>                   ))}                 </select>                 {finalizationSourceId && (() => {                   const availG = formulaInventoryMovements                     .filter((m: any) => m.formulaId === finalizationSourceId)                     .reduce((s: number, m: any) => s + parseFloat(m.gramsDelta || "0"), 0);                   return <p className="text-[hsl(183,70%,60%)] text-[11px]">Available in formula inventory: <strong>{availG.toFixed(1)} g</strong></p>;                 })()}               </div>             )}           </div>
         </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 text-xs">
