@@ -1974,6 +1974,16 @@ function CreateProductionBatchDialog({
   const [createdAtDisplay, setCreatedAtDisplay] = useState<string>("");
   const [ackNoSource, setAckNoSource] = useState(false);
 
+  // Refetch formula inventory movements every time the dialog opens so sub-
+  // formula stock reflects the latest production_in / consumption_out rows.
+  // Without this, stale cache shows sub-formula stock as 0 when movements were
+  // added after the page first loaded (staleTime is Infinity globally).
+  useEffect(() => {
+    if (open) {
+      queryClient.invalidateQueries({ queryKey: ["/api/formula-inventory-movements"] });
+    }
+  }, [open]);
+
   // Build deduction rows — for each material ingredient, resolve sources + default source.
   // For dilution-backed ingredients we deduct the weighed mass (what you
   // physically consume from stock) while also surfacing the neat aromatic
@@ -2012,11 +2022,15 @@ function CreateProductionBatchDialog({
       });
   }, [ingredients, materials, materialSources]);
 
+  // Normalize a formula id for consistent Map lookups: UUIDs in Supabase are
+  // lowercase canonical form, but be defensive against whitespace / casing.
+  const normalizeId = (v: any): string => (typeof v === "string" ? v.trim().toLowerCase() : "");
+
   // Aggregate formula inventory stats per formula_id.
   const formulaInventoryStats = useMemo(() => {
     const map = new Map<string, { available: number; prodCost: number; prodGrams: number }>();
     for (const m of formulaInventoryMovements || []) {
-      const fid = m.formulaId || m.formula_id;
+      const fid = normalizeId(m.formulaId ?? m.formula_id);
       if (!fid) continue;
       const delta = parseFloat(m.gramsDelta ?? m.grams_delta ?? "0") || 0;
       const entry = map.get(fid) || { available: 0, prodCost: 0, prodGrams: 0 };
@@ -2039,7 +2053,8 @@ function CreateProductionBatchDialog({
       .filter((ing: any) => ing.sourceType === "formula" && ing.sourceFormulaId)
       .map((ing: any) => {
         const subFormula = (allFormulas || []).find((f: any) => f.id === ing.sourceFormulaId);
-        const stats = formulaInventoryStats.get(ing.sourceFormulaId) || { available: 0, prodCost: 0, prodGrams: 0 };
+        const lookupKey = normalizeId(ing.sourceFormulaId);
+        const stats = formulaInventoryStats.get(lookupKey) || { available: 0, prodCost: 0, prodGrams: 0 };
         const avgCostPerGram = stats.prodGrams > 0 ? stats.prodCost / stats.prodGrams : 0;
         const grams = weighedGramsOf(ing);
         return {
