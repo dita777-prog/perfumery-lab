@@ -65,25 +65,54 @@ export default function FormulaInventoryPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [roleTab, setRoleTab] = useState<string>("accords");
 
-  const { data: movements = [] } = useQuery<Movement[]>({
+  const { data: movements = [] } = useQuery<any[]>({
     queryKey: ["/api/formula-inventory-movements"],
   });
   const { data: formulas = [] } = useQuery<any[]>({ queryKey: ["/api/formulas"] });
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/formula-categories"] });
   const { data: productionBatches = [] } = useQuery<any[]>({ queryKey: ["/api/production-batches"] });
 
+  const productsCategoryId = useMemo(() => {
+    const c = categories.find((c: any) => /product/i.test(c?.name || ""));
+    return c?.id ?? null;
+  }, [categories]);
+
+  const isProductCategory = (catId: string | null, catName: string | null): boolean => {
+    if (productsCategoryId && catId === productsCategoryId) return true;
+    if (catName && /product/i.test(catName)) return true;
+    return false;
+  };
+
   const aggregated = useMemo<FormulaAgg[]>(() => {
-    const byFormula = new Map<string, Movement[]>();
+    const byFormula = new Map<string, any[]>();
     for (const m of movements) {
-      const arr = byFormula.get(m.formulaId) || [];
-      arr.push(m);
-      byFormula.set(m.formulaId, arr);
+      const fid = m.formulaId ?? m.formula_id;
+      if (!fid) continue;
+      const arr = byFormula.get(fid) || [];
+      const normalized = {
+        id: m.id,
+        formulaId: fid,
+        movementType: m.movementType ?? m.movement_type,
+        gramsDelta: m.gramsDelta ?? m.grams_delta,
+        costPerGram: m.costPerGram ?? m.cost_per_gram ?? null,
+        totalCost: m.totalCost ?? m.total_cost ?? null,
+        productionBatchId: m.productionBatchId ?? m.production_batch_id ?? null,
+        relatedFormulaId: m.relatedFormulaId ?? m.related_formula_id ?? null,
+        notes: m.notes ?? null,
+        createdAt: m.createdAt ?? m.created_at ?? null,
+      } as Movement;
+      arr.push(normalized);
+      byFormula.set(fid, arr);
     }
 
     const out: FormulaAgg[] = [];
     byFormula.forEach((ms, fid) => {
       const formula = formulas.find((f: any) => f.id === fid);
-      const category = categories.find((c: any) => c.id === formula?.categoryId);
+      const categoryId = formula?.categoryId ?? formula?.category_id ?? null;
+      const category = categories.find((c: any) => c.id === categoryId);
+      const categoryName = category?.name || "—";
+      const rawRole = formula?.formulaRole ?? formula?.formula_role ?? "accord";
+      const effectiveRole = isProductCategory(categoryId, categoryName) ? "final" : rawRole;
       let availableGrams = 0;
       let producedGrams = 0;
       let consumedGrams = 0;
@@ -112,9 +141,9 @@ export default function FormulaInventoryPage() {
       out.push({
         formulaId: fid,
         formulaName: formula?.name || "Unknown formula",
-        categoryId: formula?.categoryId || null,
-        categoryName: category?.name || "—",
-        formulaRole: formula?.formulaRole || "accord",
+        categoryId,
+        categoryName,
+        formulaRole: effectiveRole,
         availableGrams,
         producedGrams,
         consumedGrams,
@@ -126,7 +155,7 @@ export default function FormulaInventoryPage() {
     });
     out.sort((a, b) => a.formulaName.localeCompare(b.formulaName));
     return out;
-  }, [movements, formulas, categories]);
+  }, [movements, formulas, categories, productsCategoryId]);
 
   const filtered = useMemo(() => {
     let rows = aggregated;
@@ -134,28 +163,28 @@ export default function FormulaInventoryPage() {
       rows = rows.filter((a) => (a.categoryId || "__none__") === categoryFilter);
     }
     if (roleTab === "accords") {
-      rows = rows.filter((a) => a.formulaRole !== "final");
+      rows = rows.filter(
+        (a) => a.formulaRole === "accord" && !isProductCategory(a.categoryId, a.categoryName),
+      );
     } else if (roleTab === "final") {
-      rows = rows.filter((a) => a.formulaRole === "final");
+      rows = rows.filter(
+        (a) => a.formulaRole === "final" || isProductCategory(a.categoryId, a.categoryName),
+      );
     }
     return rows;
-  }, [aggregated, categoryFilter, roleTab]);
+  }, [aggregated, categoryFilter, roleTab, productsCategoryId]);
 
   const totalValue = useMemo(
     () => filtered.reduce((s, a) => s + (isFinite(a.inventoryValue) ? a.inventoryValue : 0), 0),
     [filtered],
   );
 
-  const productsCategory = useMemo(
-    () => categories.find((c: any) => /product/i.test(c.name || "")),
-    [categories],
-  );
   const productFormulas = useMemo(() => {
-    if (productsCategory) {
-      return formulas.filter((f: any) => f.categoryId === productsCategory.id);
+    if (productsCategoryId) {
+      return formulas.filter((f: any) => (f.categoryId ?? f.category_id) === productsCategoryId);
     }
     return formulas;
-  }, [formulas, productsCategory]);
+  }, [formulas, productsCategoryId]);
 
   const batchLabelById = useMemo(() => {
     const m = new Map<string, string>();
