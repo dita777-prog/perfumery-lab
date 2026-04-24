@@ -1977,7 +1977,7 @@ function CreateProductionBatchDialog({
   const formulaRole = String(formula?.formulaRole || formula?.formula_role || "").toLowerCase();
   const categoryName = String(formula?.categoryName || formula?.category_name || "").toLowerCase();
   const isFinalFormula = formulaRole === "final" || categoryName === "products" || categoryName === "final formulas";
-  const isFinalizationMode = isFinalFormula && useFormulaInventory;
+    const isFinalizationMode = isFinalFormula;
   // Fetch formula inventory movements directly inside the dialog, overriding
   // the global staleTime: Infinity. refetchOnMount: "always" guarantees a
   // fresh fetch each time the dialog opens, so production_in rows added by
@@ -2101,17 +2101,19 @@ function CreateProductionBatchDialog({
     return generateBatchLabel(formula?.name || "Formula", productionBatches || []);
   }, [open, formula?.name, productionBatches]);
 
-  const missingSourceRows = isFinalizationMode ? [] : useMemo(
-    () => deductionRows.filter((r) => r.sources.length === 0 && r.gramsToDeduct > 0),
-    [deductionRows],
-  );
-  const insufficientStockRows = isFinalizationMode ? [] : useMemo(
-    () =>
-      deductionRows.filter(
-        (r) => r.sources.length > 0 && r.totalStock < r.gramsToDeduct && r.gramsToDeduct > 0,
-      ),
-    [deductionRows],
-  );
+const missingSourceRows = useMemo(
+  () => isFinalizationMode ? [] : deductionRows.filter((r) => r.sources.length === 0 && r.gramsToDeduct > 0),
+  [deductionRows, isFinalizationMode],
+);
+const insufficientStockRows = useMemo(
+  () =>
+    isFinalizationMode
+      ? []
+      : deductionRows.filter(
+          (r) => r.sources.length > 0 && r.totalStock < r.gramsToDeduct && r.gramsToDeduct > 0,
+        ),
+  [deductionRows, isFinalizationMode],
+);
 
   // Reset dialog state when it opens
   useEffect(() => {
