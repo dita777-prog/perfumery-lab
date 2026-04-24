@@ -1954,7 +1954,7 @@ function CreateProductionBatchDialog({
   materialSources,
   productionBatches,
   allFormulas,
-  formulaInventoryMovements,
+  formulaInventoryMovements: parentFormulaInventoryMovements,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -1974,13 +1974,26 @@ function CreateProductionBatchDialog({
   const [createdAtDisplay, setCreatedAtDisplay] = useState<string>("");
   const [ackNoSource, setAckNoSource] = useState(false);
 
-  // Refetch formula inventory movements every time the dialog opens so sub-
-  // formula stock reflects the latest production_in / consumption_out rows.
-  // Without this, stale cache shows sub-formula stock as 0 when movements were
-  // added after the page first loaded (staleTime is Infinity globally).
+  // Fetch formula inventory movements directly inside the dialog, overriding
+  // the global staleTime: Infinity. refetchOnMount: "always" guarantees a
+  // fresh fetch each time the dialog opens, so production_in rows added by
+  // any other batch / tab are visible here. Fall back to the parent-provided
+  // array until the fetch resolves so the table is never blank on first
+  // render.
+  const { data: freshMovements } = useQuery<any[]>({
+    queryKey: ["/api/formula-inventory-movements"],
+    enabled: open,
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+  const formulaInventoryMovements = freshMovements ?? parentFormulaInventoryMovements ?? [];
+
+  // Belt-and-suspenders: force an active refetch when the dialog opens, in
+  // case the hook above is deduped against a cached entry and skips the
+  // network roundtrip.
   useEffect(() => {
     if (open) {
-      queryClient.invalidateQueries({ queryKey: ["/api/formula-inventory-movements"] });
+      queryClient.refetchQueries({ queryKey: ["/api/formula-inventory-movements"] });
     }
   }, [open]);
 
