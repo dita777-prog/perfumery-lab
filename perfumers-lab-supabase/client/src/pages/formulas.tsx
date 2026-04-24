@@ -1957,7 +1957,7 @@ function CreateProductionBatchDialog({
   formulaInventoryMovements: parentFormulaInventoryMovements,
 }: {
   open: boolean;
-:2249
+
   formula: any;
   ingredients: any[];
   materials: any[];
