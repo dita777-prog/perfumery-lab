@@ -135,6 +135,7 @@ export type Formula = {
   changeNotes: string | null;
   author: string | null;
   formulaNotes: string | null;
+  formulaRole: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 };

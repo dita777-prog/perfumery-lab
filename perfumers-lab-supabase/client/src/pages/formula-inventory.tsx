@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { postJson, fmtGrams, fmtNum } from "@/lib/api";
@@ -30,6 +31,7 @@ type FormulaAgg = {
   formulaName: string;
   categoryId: string | null;
   categoryName: string;
+  formulaRole: string;
   availableGrams: number;
   producedGrams: number;
   consumedGrams: number;
@@ -61,6 +63,7 @@ export default function FormulaInventoryPage() {
   const [usageDialog, setUsageDialog] = useState<FormulaAgg | null>(null);
   const [adjustmentDialog, setAdjustmentDialog] = useState<FormulaAgg | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [roleTab, setRoleTab] = useState<string>("accords");
 
   const { data: movements = [] } = useQuery<Movement[]>({
     queryKey: ["/api/formula-inventory-movements"],
@@ -111,6 +114,7 @@ export default function FormulaInventoryPage() {
         formulaName: formula?.name || "Unknown formula",
         categoryId: formula?.categoryId || null,
         categoryName: category?.name || "—",
+        formulaRole: formula?.formulaRole || "accord",
         availableGrams,
         producedGrams,
         consumedGrams,
@@ -125,9 +129,17 @@ export default function FormulaInventoryPage() {
   }, [movements, formulas, categories]);
 
   const filtered = useMemo(() => {
-    if (categoryFilter === "all") return aggregated;
-    return aggregated.filter((a) => (a.categoryId || "__none__") === categoryFilter);
-  }, [aggregated, categoryFilter]);
+    let rows = aggregated;
+    if (categoryFilter !== "all") {
+      rows = rows.filter((a) => (a.categoryId || "__none__") === categoryFilter);
+    }
+    if (roleTab === "accords") {
+      rows = rows.filter((a) => a.formulaRole !== "final");
+    } else if (roleTab === "final") {
+      rows = rows.filter((a) => a.formulaRole === "final");
+    }
+    return rows;
+  }, [aggregated, categoryFilter, roleTab]);
 
   const totalValue = useMemo(
     () => filtered.reduce((s, a) => s + (isFinite(a.inventoryValue) ? a.inventoryValue : 0), 0),
@@ -182,6 +194,14 @@ export default function FormulaInventoryPage() {
           </Select>
         </div>
       </div>
+
+      <Tabs value={roleTab} onValueChange={setRoleTab} className="mb-4">
+        <TabsList>
+          <TabsTrigger value="accords" data-testid="tab-accords">Accords</TabsTrigger>
+          <TabsTrigger value="final" data-testid="tab-final">Final Formulas</TabsTrigger>
+          <TabsTrigger value="all" data-testid="tab-all">All</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">

@@ -203,6 +203,7 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/formula-categories"] });
   const { data: materialSources = [] } = useQuery<any[]>({ queryKey: ["/api/material-sources"] });
   const { data: productionBatches = [] } = useQuery<any[]>({ queryKey: ["/api/production-batches"] });
+  const { data: formulaInventoryMovements = [] } = useQuery<any[]>({ queryKey: ["/api/formula-inventory-movements"] });
 
   // Reset notes when formula changes
   useEffect(() => { setNotesText(formula.formulaNotes || ""); setEditingNotes(false); setNameValue(formula.name); setEditingName(false); setTargetConcInput(asString(formula.intendedConcentrationPercent)); }, [formula.id]);
@@ -377,6 +378,13 @@ function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { 
     },
   });
 
+  const updateFormulaRoleMut = useMutation({
+    mutationFn: (formulaRole: string) => patchJson(`/api/formulas/${formula.id}`, { formulaRole }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+    },
+  });
+
   const createCatInlineMut = useMutation({
     mutationFn: (data: any) => postJson("/api/formula-categories", data),
     onSuccess: (newCat: any) => {
@@ -517,6 +525,25 @@ updateStatusMut.mutate({ status: newStatus });
           <div className="flex items-center gap-2 mt-1">
             <Badge variant="outline">v{formula.version || 1}</Badge>
             <Badge variant={formula.status === "final" ? "default" : "secondary"}>{formula.status}</Badge>
+            <Select
+              value={formula.formulaRole || "accord"}
+              onValueChange={(v) => updateFormulaRoleMut.mutate(v)}
+            >
+              <SelectTrigger
+                className={`h-6 w-auto text-[10px] px-2 py-0 gap-1 ${
+                  (formula.formulaRole || "accord") === "final"
+                    ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300"
+                    : "border-border bg-secondary text-muted-foreground"
+                }`}
+                data-testid="select-formula-role"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="accord">Accord</SelectItem>
+                <SelectItem value="final">Final Formula</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
         <div className="flex gap-2">
@@ -778,6 +805,8 @@ updateStatusMut.mutate({ status: newStatus });
         materials={materials}
         materialSources={materialSources}
         productionBatches={productionBatches}
+        allFormulas={allFormulas}
+        formulaInventoryMovements={formulaInventoryMovements}
       />
     </div>
   );
@@ -1924,6 +1953,8 @@ function CreateProductionBatchDialog({
   materials,
   materialSources,
   productionBatches,
+  allFormulas,
+  formulaInventoryMovements,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -1932,6 +1963,8 @@ function CreateProductionBatchDialog({
   materials: any[];
   materialSources: any[];
   productionBatches: any[];
+  allFormulas: any[];
+  formulaInventoryMovements: any[];
 }) {
   const { toast } = useToast();
   const [producedGrams, setProducedGrams] = useState<string>("");
@@ -1978,6 +2011,47 @@ function CreateProductionBatchDialog({
         };
       });
   }, [ingredients, materials, materialSources]);
+
+  // Aggregate formula inventory stats per formula_id.
+  const formulaInventoryStats = useMemo(() => {
+    const map = new Map<string, { available: number; prodCost: number; prodGrams: number }>();
+    for (const m of formulaInventoryMovements || []) {
+      const fid = m.formulaId || m.formula_id;
+      if (!fid) continue;
+      const delta = parseFloat(m.gramsDelta ?? m.grams_delta ?? "0") || 0;
+      const entry = map.get(fid) || { available: 0, prodCost: 0, prodGrams: 0 };
+      entry.available += delta;
+      const type = m.movementType || m.movement_type;
+      if (type === "production_in") {
+        entry.prodCost += parseFloat(m.totalCost ?? m.total_cost ?? "0") || 0;
+        entry.prodGrams += delta;
+      }
+      map.set(fid, entry);
+    }
+    return map;
+  }, [formulaInventoryMovements]);
+
+  // Sub-formula deduction rows — ingredients sourced from another formula
+  // (accord). We deduct from that formula's inventory ledger rather than raw
+  // material stock.
+  const formulaDeductionRows = useMemo(() => {
+    return ingredients
+      .filter((ing: any) => ing.sourceType === "formula" && ing.sourceFormulaId)
+      .map((ing: any) => {
+        const subFormula = (allFormulas || []).find((f: any) => f.id === ing.sourceFormulaId);
+        const stats = formulaInventoryStats.get(ing.sourceFormulaId) || { available: 0, prodCost: 0, prodGrams: 0 };
+        const avgCostPerGram = stats.prodGrams > 0 ? stats.prodCost / stats.prodGrams : 0;
+        const grams = weighedGramsOf(ing);
+        return {
+          ingredientId: ing.id,
+          sourceFormulaId: ing.sourceFormulaId,
+          formulaName: subFormula?.name || "Unknown sub-formula",
+          grams,
+          available: stats.available,
+          avgCostPerGram,
+        };
+      });
+  }, [ingredients, allFormulas, formulaInventoryStats]);
 
   // Total aromatic (neat) mass in this batch, summed across non-solvent
   // ingredients. Useful for traceability and shown alongside the physical
@@ -2043,6 +2117,7 @@ function CreateProductionBatchDialog({
 
       let deductionCount = 0;
       let totalBatchCost = 0;
+      let subFormulaDeductionCount = 0;
       for (const row of deductionRows) {
         const sourceId = selectedSourceIds[row.ingredientId];
         if (!sourceId) continue; // skip if no source available
@@ -2068,6 +2143,27 @@ function CreateProductionBatchDialog({
         const src = materialSources.find((ms: any) => ms.id === sourceId);
         const pricePerGram = parseFloat(src?.pricePerGram || src?.price_per_gram || "0") || 0;
         totalBatchCost += row.neatGrams * pricePerGram;
+      }
+
+      // Deduct sub-formula (accord) ingredients from formula inventory ledger.
+      for (const row of formulaDeductionRows) {
+        if (row.grams <= 0) continue;
+        try {
+          await postJson("/api/formula-inventory-movements", {
+            formulaId: row.sourceFormulaId,
+            movementType: "consumption_out",
+            gramsDelta: String(-row.grams),
+            costPerGram: row.avgCostPerGram > 0 ? String(row.avgCostPerGram) : null,
+            totalCost: row.avgCostPerGram > 0 ? String(-(row.grams * row.avgCostPerGram)) : null,
+            productionBatchId: batch.id,
+            relatedFormulaId: formula.id,
+            notes: `Used in batch ${batchLabel}`,
+          });
+          subFormulaDeductionCount += 1;
+          totalBatchCost += row.grams * (row.avgCostPerGram || 0);
+        } catch (err: any) {
+          console.warn("Failed to insert formula_inventory_movements consumption_out:", err?.message || err);
+        }
       }
 
       // Record formula inventory production_in movement.
@@ -2097,7 +2193,8 @@ function CreateProductionBatchDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] });
       queryClient.invalidateQueries({ queryKey: ["/api/formula-inventory-movements"] });
 
-      toast({ title: `Batch ${batchLabel} created — ${deductionCount} materials deducted` });
+      const subMsg = subFormulaDeductionCount > 0 ? `, ${subFormulaDeductionCount} sub-formula${subFormulaDeductionCount === 1 ? "" : "s"}` : "";
+      toast({ title: `Batch ${batchLabel} created — ${deductionCount} materials${subMsg} deducted` });
       onOpenChange(false);
     } catch (err: any) {
       toast({
@@ -2162,16 +2259,16 @@ function CreateProductionBatchDialog({
 
           <div>
             <div className="text-xs font-semibold text-muted-foreground mb-2">Stock deductions</div>
-            {deductionRows.length === 0 ? (
+            {deductionRows.length === 0 && formulaDeductionRows.length === 0 ? (
               <div className="text-xs text-muted-foreground p-3 bg-secondary/30 rounded border border-border">
-                No material ingredients to deduct. Only material-sourced ingredients generate stock movements.
+                No ingredients to deduct.
               </div>
             ) : (
               <div className="bg-card rounded-lg border border-border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-xs text-muted-foreground">
-                      <th className="text-left p-2 pl-3">Material</th>
+                      <th className="text-left p-2 pl-3">Ingredient</th>
                       <th className="text-right p-2">Weigh (g)</th>
                       <th className="text-right p-2">Neat (g)</th>
                       <th className="text-right p-2">Deduct (g)</th>
@@ -2180,6 +2277,44 @@ function CreateProductionBatchDialog({
                     </tr>
                   </thead>
                   <tbody>
+                    {formulaDeductionRows.map((row) => {
+                      const insufficient = row.available < row.grams && row.grams > 0;
+                      return (
+                        <tr key={row.ingredientId} className="border-b border-border/30">
+                          <td className="p-2 pl-3">
+                            {row.formulaName}
+                            <Badge variant="outline" className="ml-1 text-[9px] text-emerald-300 border-emerald-500/40">
+                              accord
+                            </Badge>
+                          </td>
+                          <td className="text-right p-2 font-mono text-xs text-muted-foreground">—</td>
+                          <td className="text-right p-2 font-mono text-xs">
+                            {fmtGrams(row.grams)}
+                          </td>
+                          <td className="text-right p-2 font-mono text-xs">
+                            {fmtGrams(row.grams)}
+                          </td>
+                          <td
+                            className={`text-right p-2 font-mono text-xs ${
+                              insufficient ? "text-red-400" : ""
+                            }`}
+                          >
+                            {fmtGrams(row.available)}
+                          </td>
+                          <td className="p-2 pr-3">
+                            <span className="text-xs text-muted-foreground">
+                              Formula inventory
+                              {insufficient && (
+                                <span className="ml-2 inline-flex items-center gap-1 text-red-500 font-semibold">
+                                  <AlertTriangle className="w-3.5 h-3.5" />
+                                  Insufficient stock
+                                </span>
+                              )}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {deductionRows.map((row) => {
                       const noSource = row.sources.length === 0;
                       const insufficient = !noSource && row.totalStock < row.gramsToDeduct;
