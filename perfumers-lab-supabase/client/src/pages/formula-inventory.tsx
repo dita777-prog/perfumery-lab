@@ -73,13 +73,13 @@ export default function FormulaInventoryPage() {
   const { data: productionBatches = [] } = useQuery<any[]>({ queryKey: ["/api/production-batches"] });
 
   const productsCategoryId = useMemo(() => {
-    const c = categories.find((c: any) => /product/i.test(c?.name || ""));
+    const c = categories.find((c: any) => /^products$/i.test(c?.name || ""));
     return c?.id ?? null;
   }, [categories]);
 
   const isProductCategory = (catId: string | null, catName: string | null): boolean => {
     if (productsCategoryId && catId === productsCategoryId) return true;
-    if (catName && /product/i.test(catName)) return true;
+    if (catName && /^products$/i.test(catName)) return true;
     return false;
   };
 
