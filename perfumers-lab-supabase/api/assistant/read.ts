@@ -2,7 +2,8 @@
 // Whitelisted read endpoint for the external assistant.
 // Required env vars: ASSISTANT_API_TOKEN, SUPABASE_URL, SUPABASE_ANON_KEY
 import { createClient } from '@supabase/supabase-js';
-import { checkAuth, hasTokenConfigured } from '../auth';
+function checkAuth(req: any): boolean { const auth = (req.headers['authorization'] || req.headers['Authorization'] || '') as string; const token = auth.replace('Bearer ', '').trim(); return !!process.env.ASSISTANT_API_TOKEN && token === process.env.ASSISTANT_API_TOKEN; }
+function hasTokenConfigured(): boolean { return !!process.env.ASSISTANT_API_TOKEN; }
 
 const TABLE_COLUMNS: Record<string, string> = {
   formulas: 'id, name, category_id, status, archived_at, intended_concentration_percent, total_batch_grams',
