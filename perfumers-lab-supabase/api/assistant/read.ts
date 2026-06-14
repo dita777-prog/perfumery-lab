@@ -19,18 +19,18 @@ function hasTokenConfigured(): boolean { return !!process.env.ASSISTANT_API_TOKE
 
 const TABLE_COLUMNS: Record<string, string> = {
   formulas: 'id, name, category_id, status, archived_at, intended_concentration_percent, total_batch_grams',
-  formula_ingredients: 'id, formula_id, material_id, grams_as_weighed, neat_grams, percent_in_formula, source_type, source_id',
-  materials: 'id, name, treat_as_solvent, unit',
+  formula_ingredients: 'id, formula_id, material_id, grams_as_weighed, neat_grams, percent_in_formula, source_type',
+  materials: 'id, name, treat_as_solvent, status, notes_sensory, strength, tags',
   material_sources: 'id, material_id, supplier_id, stock_grams, price_per_gram',
   production_batches: 'id, batch_label, formula_id, produced_grams, produced_at, notes',
-  stock_movements: 'id, material_source_id, movement_type, grams_delta, related_formula_id, date, notes, batch_label, produced_grams',
+  stock_movements: 'id, material_source_id, movement_type, grams_delta, related_formula_id, date, notes',
   formula_categories: 'id, name',
 };
 
 const ALLOWED_ORDER_FIELDS: Record<string, string[]> = {
   formulas: ['name', 'status', 'archived_at', 'intended_concentration_percent', 'total_batch_grams'],
   formula_ingredients: ['formula_id', 'material_id', 'grams_as_weighed'],
-  materials: ['name', 'unit', 'treat_as_solvent'],
+  materials: ['name', 'status', 'strength'],
   material_sources: ['stock_grams', 'price_per_gram', 'supplier_id', 'material_id'],
   production_batches: ['produced_at', 'batch_label', 'produced_grams'],
   stock_movements: ['date', 'movement_type', 'grams_delta'],
