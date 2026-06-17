@@ -526,6 +526,15 @@ export default function StockPage() {
   );
 }
 
+/** Returns the signed gramsDelta: positive for restock/adjustment, negative for use/loss/production. */
+function signedDelta(movementType: string, gramsValue: string): number {
+  const value = Math.abs(parseFloat(gramsValue) || 0);
+  if (!value) return 0;
+  return movementType === "use" || movementType === "loss" || movementType === "production"
+    ? -value
+    : value;
+}
+
 function StockMovementDialog({ open, onOpenChange, sources, productionBatches }: any) {
   const { toast } = useToast();
   const [sourceId, setSourceId] = useState("");
@@ -556,10 +565,32 @@ function StockMovementDialog({ open, onOpenChange, sources, productionBatches }:
 
   const mutation = useMutation({
     mutationFn: (data: any) => postJson("/api/stock-movements", data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/stock-movements", "enriched"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] });
+    onSuccess: async (_data, variables: any) => {
+      const delta = signedDelta(
+        String(variables?.movementType || ""),
+        String(variables?.gramsDelta || "0"),
+      );
+
+      // Optimistic cache update for material-sources so UI reflects change immediately
+      queryClient.setQueryData(["/api/material-sources"], (current: any[] | undefined) =>
+        (current ?? []).map((row: any) => {
+          if (row.id !== variables?.materialSourceId) return row;
+          const currentStock = parseFloat(row.stockGrams ?? row.stock_grams ?? "0") || 0;
+          return {
+            ...row,
+            stockGrams: String(currentStock + delta),
+          };
+        }),
+      );
+
+      // Invalidate all related queries so data is fresh from DB
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/stock-movements", "enriched"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/materials"] }),
+      ]);
+
       onOpenChange(false);
       reset();
       toast({ title: "Movement recorded" });
@@ -634,14 +665,17 @@ function StockMovementDialog({ open, onOpenChange, sources, productionBatches }:
           <Button
             className="w-full"
             disabled={!sourceId || !grams || mutation.isPending}
-            onClick={() => mutation.mutate({
-              materialSourceId: sourceId,
-              movementType: type,
-              gramsDelta: String(parseFloat(grams) || 0),
-              productionBatchId: productionBatchId || null,
-              batchLabel: batchLabel.trim() || null,
-              notes: notes.trim() || null,
-            })}
+            onClick={() => {
+              const delta = signedDelta(type, grams);
+              mutation.mutate({
+                materialSourceId: sourceId,
+                movementType: type,
+                gramsDelta: String(delta),
+                productionBatchId: productionBatchId || null,
+                batchLabel: batchLabel.trim() || null,
+                notes: notes.trim() || null,
+              });
+            }}
             data-testid="button-record-movement"
           >
             Record
