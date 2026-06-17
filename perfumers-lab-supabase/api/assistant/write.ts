@@ -2,6 +2,7 @@
 // Whitelisted write endpoint for the external assistant.
 // Required env vars: ASSISTANT_API_TOKEN, SUPABASE_URL, SUPABASE_ANON_KEY
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+// @ts-ignore -- auth.js has no TS declaration
 import { checkAuth, hasTokenConfigured } from '../auth';
 
 const UUID_RE = /^[0-9a-f-]{36}$/i;
