@@ -90,4 +90,79 @@ async function createBatch(req, res) {
   }
 
   const batchLabel = pick(body, ['batchLabel', 'batch_label']);
-  const formulaId = pick(body, ['formulaId', 
+  const formulaId = pick(body, ['formulaId', 'formula_id']);
+  const totalGrams = toNumber(pick(body, ['totalGrams', 'total_grams']));
+  const notes = pick(body, ['notes']) || null;
+  const producedAt = toDateOnly(pick(body, ['producedAt', 'produced_at']));
+
+  if (!formulaId) return res.status(400).json({ error: 'formulaId is required' });
+  if (!totalGrams || totalGrams <= 0) return res.status(400).json({ error: 'totalGrams must be a positive number' });
+
+  const { data: formula, error: formulaError } = await supabase
+    .from('formulas')
+    .select('*, formula_ingredients(*, materials(*), material_dilutions(*))')
+    .eq('id', formulaId)
+    .single();
+
+  if (formulaError || !formula) {
+    return res.status(404).json({ error: formulaError?.message || 'Formula not found' });
+  }
+
+  const ingredients = formula.formula_ingredients || [];
+  const stockUpdates = [];
+  const batchIngredients = [];
+
+  for (const ing of ingredients) {
+    const percent = ingredientPercent(ing);
+    if (percent === null) continue;
+
+    const gramsNeeded = (percent / 100) * totalGrams;
+    const materialId = ingredientMaterialId(ing);
+    const name = ingredientName(ing);
+
+    batchIngredients.push({ name, percent, grams: gramsNeeded, material_id: materialId });
+
+    if (!materialId) continue;
+
+    const { data: sources } = await supabase
+      .from('material_stock')
+      .select('id, stock_grams')
+      .eq('material_id', materialId);
+
+    const best = chooseBestSource(sources);
+    if (best) {
+      stockUpdates.push({ id: best.id, stock_grams: Math.max(0, (sourceStock(best) - gramsNeeded)) });
+    }
+  }
+
+  const { data: batch, error: batchError } = await supabase
+    .from('production_batches')
+    .insert({
+      batch_label: batchLabel,
+      formula_id: formulaId,
+      total_grams: totalGrams,
+      notes,
+      produced_at: producedAt,
+      ingredients_snapshot: batchIngredients,
+    })
+    .select()
+    .single();
+
+  if (batchError) return res.status(400).json({ error: batchError.message });
+
+  for (const upd of stockUpdates) {
+    await supabase.from('material_stock').update({ stock_grams: upd.stock_grams }).eq('id', upd.id);
+  }
+
+  return res.status(201).json(batch);
+}
+
+export default async function handler(req, res) {
+  setCors(res);
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  if (req.method === 'GET') return listBatches(req, res);
+  if (req.method === 'POST') return createBatch(req, res);
+
+  return res.status(405).json({ error: 'Method not allowed' });
+}
