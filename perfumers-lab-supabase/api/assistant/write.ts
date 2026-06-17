@@ -2,8 +2,22 @@
 // Whitelisted write endpoint for the external assistant.
 // Required env vars: ASSISTANT_API_TOKEN, SUPABASE_URL, SUPABASE_ANON_KEY
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-// @ts-ignore -- auth.js has no TS declaration
-import { checkAuth, hasTokenConfigured } from '../auth';
+
+// Inline auth helpers (avoids ERR_MODULE_NOT_FOUND at Vercel runtime)
+function hasTokenConfigured(): boolean {
+  return !!process.env.ASSISTANT_API_TOKEN;
+}
+
+function checkAuth(req: any): boolean {
+  const token = process.env.ASSISTANT_API_TOKEN;
+  if (!token) return false;
+  const auth = (req.headers['authorization'] || req.headers['Authorization'] || '') as string;
+  const headerToken = auth.replace('Bearer ', '').trim();
+  if (headerToken === token) return true;
+  const queryApiKey = (req.query && req.query.apikey) || '';
+  if (queryApiKey === token) return true;
+  return false;
+}
 
 const UUID_RE = /^[0-9a-f-]{36}$/i;
 const MOVEMENT_TYPES = ['restock', 'use', 'adjustment', 'production', 'correction'] as const;
@@ -13,7 +27,9 @@ type Action =
   | 'create_stock_movement'
   | 'create_production_batch'
   | 'update_formula_notes'
-  | 'update_formula_status';
+  | 'update_formula_status'
+  | 'create_formula'
+  | 'create_formula_ingredient';
 
 function setCors(res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -38,7 +54,7 @@ async function writeAudit(supabase: SupabaseClient, action: string, data: any, r
       result_id: resultId,
     });
   } catch {
-    // intentional silent failure — write already succeeded
+    // intentional silent failure
   }
 }
 
@@ -71,10 +87,66 @@ export default async function handler(req: any, res: any) {
 
   const action = body.action as Action | undefined;
   const data = body.data;
+
   if (!action) return res.status(400).json({ error: 'Missing field: action' });
   if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Missing field: data' });
 
   try {
+    // ── create_formula ──────────────────────────────────────────────────────
+    if (action === 'create_formula') {
+      const missing = missingFields(data, ['name', 'category']);
+      if (missing.length) return res.status(400).json({ error: 'Missing fields', missing });
+
+      const insert: any = {
+        name: data.name,
+        category: data.category,
+      };
+      if (data.status) insert.status = data.status;
+      if (data.notes !== undefined) insert.notes = data.notes;
+      if (data.version !== undefined) insert.version = data.version;
+      if (data.batch_size !== undefined) insert.batch_size = data.batch_size;
+
+      const { data: written, error } = await supabase
+        .from('formulas')
+        .insert(insert)
+        .select()
+        .single();
+
+      if (error) return res.status(400).json({ error: error.message });
+      await writeAudit(supabase, action, data, written?.id ?? null);
+      return res.status(200).json({ ok: true, action, written });
+    }
+
+    // ── create_formula_ingredient ────────────────────────────────────────────
+    if (action === 'create_formula_ingredient') {
+      const missing = missingFields(data, ['formula_id', 'material_id', 'grams']);
+      if (missing.length) return res.status(400).json({ error: 'Missing fields', missing });
+      if (!UUID_RE.test(data.formula_id)) return res.status(400).json({ error: 'Invalid formula_id (uuid)' });
+      if (!UUID_RE.test(data.material_id)) return res.status(400).json({ error: 'Invalid material_id (uuid)' });
+      if (typeof data.grams !== 'number' || !Number.isFinite(data.grams) || data.grams <= 0) {
+        return res.status(400).json({ error: 'grams must be a positive finite number' });
+      }
+
+      const insert: any = {
+        formula_id: data.formula_id,
+        material_id: data.material_id,
+        grams: data.grams,
+      };
+      if (data.notes !== undefined) insert.notes = data.notes;
+      if (data.order !== undefined) insert.order = data.order;
+
+      const { data: written, error } = await supabase
+        .from('formula_ingredients')
+        .insert(insert)
+        .select()
+        .single();
+
+      if (error) return res.status(400).json({ error: error.message });
+      await writeAudit(supabase, action, data, written?.id ?? null);
+      return res.status(200).json({ ok: true, action, written });
+    }
+
+    // ── create_stock_movement ────────────────────────────────────────────────
     if (action === 'create_stock_movement') {
       const missing = missingFields(data, ['material_source_id', 'movement_type', 'grams_delta', 'date']);
       if (missing.length) return res.status(400).json({ error: 'Missing fields', missing });
@@ -108,12 +180,13 @@ export default async function handler(req: any, res: any) {
         .insert(insert)
         .select()
         .single();
-      if (error) return res.status(400).json({ error: error.message });
 
+      if (error) return res.status(400).json({ error: error.message });
       await writeAudit(supabase, action, data, written?.id ?? null);
       return res.status(200).json({ ok: true, action, written });
     }
 
+    // ── create_production_batch ──────────────────────────────────────────────
     if (action === 'create_production_batch') {
       const missing = missingFields(data, ['batch_label', 'formula_id', 'produced_grams', 'produced_at']);
       if (missing.length) return res.status(400).json({ error: 'Missing fields', missing });
@@ -135,12 +208,13 @@ export default async function handler(req: any, res: any) {
         .insert(insert)
         .select()
         .single();
-      if (error) return res.status(400).json({ error: error.message });
 
+      if (error) return res.status(400).json({ error: error.message });
       await writeAudit(supabase, action, data, written?.id ?? null);
       return res.status(200).json({ ok: true, action, written });
     }
 
+    // ── update_formula_notes ─────────────────────────────────────────────────
     if (action === 'update_formula_notes') {
       const missing = missingFields(data, ['formula_id', 'notes']);
       if (missing.length) return res.status(400).json({ error: 'Missing fields', missing });
@@ -152,19 +226,19 @@ export default async function handler(req: any, res: any) {
         .eq('id', data.formula_id)
         .select()
         .single();
+
       if (error) {
-        // If the notes column doesn't exist, surface a clear 400.
         const msg = error.message || '';
-        if (/column.*notes.*does not exist/i.test(msg) || /notes/i.test(msg) && /schema/i.test(msg)) {
-          return res.status(400).json({ error: 'formulas.notes column does not exist — action unavailable' });
+        if (/column.*notes.*does not exist/i.test(msg) || (/notes/i.test(msg) && /schema/i.test(msg))) {
+          return res.status(400).json({ error: 'formulas.notes column does not exist' });
         }
         return res.status(400).json({ error: msg });
       }
-
       await writeAudit(supabase, action, data, written?.id ?? null);
       return res.status(200).json({ ok: true, action, written });
     }
 
+    // ── update_formula_status ────────────────────────────────────────────────
     if (action === 'update_formula_status') {
       const missing = missingFields(data, ['formula_id', 'status']);
       if (missing.length) return res.status(400).json({ error: 'Missing fields', missing });
@@ -183,13 +257,14 @@ export default async function handler(req: any, res: any) {
         .eq('id', data.formula_id)
         .select()
         .single();
-      if (error) return res.status(400).json({ error: error.message });
 
+      if (error) return res.status(400).json({ error: error.message });
       await writeAudit(supabase, action, data, written?.id ?? null);
       return res.status(200).json({ ok: true, action, written });
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });
+
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
