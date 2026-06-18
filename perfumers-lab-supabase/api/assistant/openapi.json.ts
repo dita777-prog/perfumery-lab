@@ -180,37 +180,7 @@ export default function handler(_req: any, res: any) {
           },
         },
       },
-      '/api/assistant/formula-detail': {
-        get: {
-          operationId: 'getFormulaDetail',
-          summary: 'Get one formula with category and ingredients',
-          description:
-            'Returns a stable envelope containing one formula and its ingredients. Use id for the most reliable lookup, or name with optional category/category_id.',
-          security: [{ bearerAuth: [] }],
-          parameters: [
-            { name: 'id', in: 'query', required: false, description: 'Formula UUID', schema: { type: 'string' } },
-            { name: 'name', in: 'query', required: false, description: 'Exact formula name', schema: { type: 'string' } },
-            { name: 'category', in: 'query', required: false, description: 'Category name, e.g. PRODUCTION', schema: { type: 'string' } },
-            { name: 'category_id', in: 'query', required: false, description: 'Category UUID', schema: { type: 'string' } },
-          ],
-          responses: {
-            '200': {
-              description: 'Formula detail returned successfully',
-              content: {
-                'application/json': {
-                  schema: { $ref: '#/components/schemas/AssistantEnvelope' },
-                },
-              },
-            },
-            '400': { description: 'Missing id or name' },
-            '401': { description: 'Unauthorized' },
-            '404': { description: 'Formula not found' },
-            '409': { description: 'Multiple formulas matched' },
-            '500': { description: 'Server error' },
-            '503': { description: 'Token not configured' },
-          },
-        },
-      },
+      
       '/api/assistant/write': {
         post: {
           operationId: 'writeAction',
