@@ -94,6 +94,42 @@ export default function handler(_req: any, res: any) {
           },
         },
       },
+            '/api/assistant/formula-detail': {
+        get: {
+          operationId: 'getFormulaDetail',
+          summary: 'Get one formula with category and ingredients',
+          description: 'Returns a single formula including its category and ingredient rows with material details. Use id for the most reliable lookup, or name with optional category/category_id.',
+          security: [{ bearerAuth: [] }, { apiKeyQuery: [] }],
+          parameters: [
+            { name: 'id', in: 'query', required: false, description: 'Formula UUID', schema: { type: 'string' } },
+            { name: 'name', in: 'query', required: false, description: 'Exact formula name', schema: { type: 'string' } },
+            { name: 'category', in: 'query', required: false, description: 'Category name, e.g. PRODUCTION', schema: { type: 'string' } },
+            { name: 'category_id', in: 'query', required: false, description: 'Category UUID', schema: { type: 'string' } },
+            { name: 'apikey', in: 'query', required: false, description: 'API token (alternative to Bearer header)', schema: { type: 'string' } },
+          ],
+          responses: {
+            '200': {
+              description: 'Formula detail returned successfully',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      formula: { type: 'object' },
+                      ingredients: { type: 'array', items: { type: 'object' } },
+                      ingredient_count: { type: 'integer' },
+                    },
+                  },
+                },
+              },
+            },
+            '400': { description: 'Missing id or name' },
+            '401': { description: 'Unauthorized' },
+            '404': { description: 'Formula not found' },
+            '409': { description: 'Multiple formulas matched; narrow the query' },
+          },
+        },
+      },
       '/api/assistant/write': {
         post: {
           operationId: 'writeAction',
