@@ -2158,7 +2158,7 @@ const insufficientStockRows = useMemo(
 
       let deductionCount = 0;
       let totalBatchCost = 0;
-              String(-(row// producedGramsNum already declared above.grams * batchScaleFactor * row.avgCostPerGram))(producedGrams) || 0;
+              const producedGramsNum = parseFloat(producedGrams) || 0; 
               const baseFormulaGrams = [
                           ...deductionRows.map((r: any) => r.neatGrams || 0),
                           ...formulaDeductionRows.map((r: any) => r.grams || 0),
