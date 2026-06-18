@@ -41,6 +41,14 @@ type FormulaAgg = {
   movements: Movement[];
 };
 
+type SortOrder =
+  | "latest"
+  | "oldest"
+  | "name_asc"
+  | "name_desc"
+  | "stock_desc"
+  | "value_desc";
+
 function num(v: string | number | null | undefined): number {
   if (v === null || v === undefined) return 0;
   const n = typeof v === "number" ? v : parseFloat(v);
@@ -64,6 +72,7 @@ export default function FormulaInventoryPage() {
   const [adjustmentDialog, setAdjustmentDialog] = useState<FormulaAgg | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [roleTab, setRoleTab] = useState<string>("accords");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("latest");
 
   const { data: movements = [] } = useQuery<any[]>({
     queryKey: ["/api/formula-inventory-movements"],
@@ -153,15 +162,16 @@ export default function FormulaInventoryPage() {
         movements: sortedMs,
       });
     });
-    out.sort((a, b) => a.formulaName.localeCompare(b.formulaName));
     return out;
   }, [movements, formulas, categories, productsCategoryId]);
 
   const filtered = useMemo(() => {
     let rows = aggregated;
+
     if (categoryFilter !== "all") {
       rows = rows.filter((a) => (a.categoryId || "__none__") === categoryFilter);
     }
+
     if (roleTab === "accords") {
       rows = rows.filter(
         (a) => a.formulaRole === "accord" && !isProductCategory(a.categoryId, a.categoryName),
@@ -171,8 +181,41 @@ export default function FormulaInventoryPage() {
         (a) => a.formulaRole === "final" || isProductCategory(a.categoryId, a.categoryName),
       );
     }
-    return rows;
-  }, [aggregated, categoryFilter, roleTab, productsCategoryId]);
+
+    const sorted = [...rows];
+
+    sorted.sort((a, b) => {
+      const ta = a.lastMovementAt || "";
+      const tb = b.lastMovementAt || "";
+
+      switch (sortOrder) {
+        case "latest":
+          if (ta !== tb) return tb.localeCompare(ta);
+          return a.formulaName.localeCompare(b.formulaName);
+
+        case "oldest":
+          if (ta !== tb) return ta.localeCompare(tb);
+          return a.formulaName.localeCompare(b.formulaName);
+
+        case "name_desc":
+          return b.formulaName.localeCompare(a.formulaName);
+
+        case "stock_desc":
+          if (b.availableGrams !== a.availableGrams) return b.availableGrams - a.availableGrams;
+          return a.formulaName.localeCompare(b.formulaName);
+
+        case "value_desc":
+          if (b.inventoryValue !== a.inventoryValue) return b.inventoryValue - a.inventoryValue;
+          return a.formulaName.localeCompare(b.formulaName);
+
+        case "name_asc":
+        default:
+          return a.formulaName.localeCompare(b.formulaName);
+      }
+    });
+
+    return sorted;
+  }, [aggregated, categoryFilter, roleTab, sortOrder, productsCategoryId]);
 
   const totalValue = useMemo(
     () => filtered.reduce((s, a) => s + (isFinite(a.inventoryValue) ? a.inventoryValue : 0), 0),
@@ -202,25 +245,44 @@ export default function FormulaInventoryPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-start justify-between gap-3 mb-4">
         <div>
           <h1 className="text-xl font-semibold">Formula Inventory</h1>
           <p className="text-xs text-muted-foreground mt-1">
             Event-sourced ledger of NEAT formula stock. Produced via batches, consumed by finished products.
           </p>
         </div>
-        <div className="w-48">
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="h-8 text-xs" data-testid="select-category-filter">
-              <SelectValue placeholder="All categories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All categories</SelectItem>
-              {categories.map((c: any) => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+        <div className="flex items-center gap-2">
+          <div className="w-44">
+            <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as SortOrder)}>
+              <SelectTrigger className="h-8 text-xs" data-testid="select-sort-order">
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="latest">Newest activity</SelectItem>
+                <SelectItem value="oldest">Oldest activity</SelectItem>
+                <SelectItem value="name_asc">Formula name A–Z</SelectItem>
+                <SelectItem value="name_desc">Formula name Z–A</SelectItem>
+                <SelectItem value="stock_desc">Highest stock</SelectItem>
+                <SelectItem value="value_desc">Highest value</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="w-48">
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="h-8 text-xs" data-testid="select-category-filter">
+                <SelectValue placeholder="All categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All categories</SelectItem>
+                {categories.map((c: any) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
