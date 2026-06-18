@@ -2158,6 +2158,12 @@ const insufficientStockRows = useMemo(
 
       let deductionCount = 0;
       let totalBatchCost = 0;
+              String(-(row// producedGramsNum already declared above.grams * batchScaleFactor * row.avgCostPerGram))(producedGrams) || 0;
+              const baseFormulaGrams = [
+                          ...deductionRows.map((r: any) => r.neatGrams || 0),
+                          ...formulaDeductionRows.map((r: any) => r.grams || 0),
+                        ].reduce((sum: number, g: number) => sum + g, 0);
+              const batchScaleFactor = baseFormulaGrams > 0 ? producedGramsNum / baseFormulaGrams : 1;
       let subFormulaDeductionCount = 0;
       // Final/product formulas: source_type='material' rows still deduct from
       // raw material stock here, while source_type='formula' rows below deduct
@@ -2175,7 +2181,7 @@ const insufficientStockRows = useMemo(
         await postJson("/api/stock-movements", {
           materialSourceId: sourceId,
           movementType: "production",
-          gramsDelta: String(-row.gramsToDeduct),
+          gramsDelta: String(-row.gramsToDeduct * batchScaleFactor),
           batchLabel,
           productionBatchId: batch.id,
           relatedFormulaId: formula.id,
@@ -2186,7 +2192,7 @@ const insufficientStockRows = useMemo(
         // Accumulate cost based on neat grams consumed from this source
         const src = materialSources.find((ms: any) => ms.id === sourceId);
         const pricePerGram = parseFloat(src?.pricePerGram || src?.price_per_gram || "0") || 0;
-        totalBatchCost += row.neatGrams * pricePerGram;
+        totalBatchCost += row.neatGrams * batchScaleFactor * pricePerGram;
       }
 
       // Deduct sub-formula (accord) ingredients from formula inventory ledger.
@@ -2196,15 +2202,15 @@ const insufficientStockRows = useMemo(
           await postJson("/api/formula-inventory-movements", {
             formulaId: row.sourceFormulaId,
             movementType: "consumption_out",
-            gramsDelta: String(-row.grams),
+            gramsDelta: String(-row.grams * batchScaleFactor),
             costPerGram: row.avgCostPerGram > 0 ? String(row.avgCostPerGram) : null,
-            totalCost: row.avgCostPerGram > 0 ? String(-(row.grams * row.avgCostPerGram)) : null,
+            totalCost: row.avgCostPerGram > 0 ? String(-(row.grams * batchScaleFactor * row.avgCostPerGram)) : null,
             productionBatchId: batch.id,
             relatedFormulaId: formula.id,
             notes: `Used in batch ${batchLabel}`,
           });
           subFormulaDeductionCount += 1;
-          totalBatchCost += row.grams * (row.avgCostPerGram || 0);
+          totalBatchCost += row.grams * batchScaleFactor * (row.avgCostPerGram || 0);
         } catch (err: any) {
           console.warn("Failed to insert formula_inventory_movements consumption_out:", err?.message || err);
         }
@@ -2213,7 +2219,6 @@ const insufficientStockRows = useMemo(
       // Record formula inventory production_in movement.
       // Raw materials are already deducted — this is additive. If the insert
       // fails, log a warning but don't block the batch creation.
-      const producedGramsNum = parseFloat(producedGrams) || 0;
       if (producedGramsNum > 0) {
         try {
           const costPerGram = totalBatchCost > 0 ? totalBatchCost / producedGramsNum : 0;
