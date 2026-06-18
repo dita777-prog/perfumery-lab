@@ -7,13 +7,14 @@ export default function handler(_req: any, res: any) {
     info: {
       title: 'Perfumery Lab Assistant API',
       description:
-        'Stable assistant API for Perfumery Lab. Auth is Authorization: Bearer <ASSISTANT_API_TOKEN> only.',
+        'Stable assistant API for Perfumery Lab. Auth supports Authorization: Bearer <ASSISTANT_API_TOKEN> or ?apikey=<ASSISTANT_API_TOKEN>.',
       version: '2.0.0',
     },
     servers: [{ url: 'https://perfumery-lab.vercel.app' }],
     components: {
       securitySchemes: {
         bearerAuth: { type: 'http', scheme: 'bearer' },
+        apiKeyQuery: { type: 'apiKey', in: 'query', name: 'apikey' },
       },
       schemas: {
         AssistantError: {
@@ -30,7 +31,7 @@ export default function handler(_req: any, res: any) {
           properties: {
             endpoint: { type: 'string' },
             request_url: { type: 'string' },
-            auth_mode: { type: 'string', enum: ['bearer', 'missing', 'query_apikey_not_allowed'] },
+            auth_mode: { type: 'string', enum: ['bearer', 'query_apikey', 'missing'] },
             status: { type: 'integer' },
             table: { type: 'string' },
             count: { type: 'integer' },
@@ -71,15 +72,15 @@ export default function handler(_req: any, res: any) {
         },
       },
     },
-    security: [{ bearerAuth: [] }],
+    security: [{ bearerAuth: [] }, { apiKeyQuery: [] }],
     paths: {
       '/api/assistant/read': {
         get: {
           operationId: 'readTable',
           summary: 'Read normalized rows from a whitelisted table',
           description:
-            'Returns a stable envelope with normalized assistant fields. Use Authorization: Bearer <ASSISTANT_API_TOKEN>.',
-          security: [{ bearerAuth: [] }],
+            'Returns a stable envelope with normalized assistant fields. Use Authorization: Bearer <ASSISTANT_API_TOKEN> or ?apikey=<ASSISTANT_API_TOKEN>.',
+          security: [{ bearerAuth: [] }, { apiKeyQuery: [] }],
           parameters: [
             {
               name: 'table',
@@ -98,6 +99,13 @@ export default function handler(_req: any, res: any) {
                   'formula_categories',
                 ],
               },
+            },
+            {
+              name: 'apikey',
+              in: 'query',
+              required: false,
+              description: 'API token as query fallback',
+              schema: { type: 'string' },
             },
             {
               name: 'id',
@@ -180,7 +188,6 @@ export default function handler(_req: any, res: any) {
           },
         },
       },
-      
       '/api/assistant/write': {
         post: {
           operationId: 'writeAction',
