@@ -205,7 +205,7 @@ export async function searchAll(query: string): Promise<{ materials: any[]; form
 
   const [mResult, fResult, dResult] = await Promise.all([
     supabase.from("materials").select("*").or(`name.ilike.${q},cas_number.ilike.${q},notes_sensory.ilike.${q}`),
-    supabase.from("formulas").select("*").or(`name.ilike.${q},formula_notes.ilike.${q}`),
+    supabase.from("formulas").select("*").or(`name.ilike.${q},commercial_name.ilike.${q},formula_notes.ilike.${q}`),
     supabase.from("decisions").select("*").or(`what_was_decided.ilike.${q},why.ilike.${q},category.ilike.${q}`),
   ]);
 
