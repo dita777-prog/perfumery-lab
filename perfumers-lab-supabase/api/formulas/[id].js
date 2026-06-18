@@ -22,13 +22,18 @@ export default async function handler(req, res) {
     if (req.method === 'PATCH') {
       const body = req.body || {};
       const updates = {};
+
       if (body.name !== undefined) updates.name = body.name;
+      if (body.commercialName !== undefined) updates.commercial_name = body.commercialName;
       if (body.categoryId !== undefined) updates.category_id = body.categoryId;
       if (body.status !== undefined) updates.status = body.status;
       if (body.archivedAt !== undefined) updates.archived_at = body.archivedAt;
       if (body.formulaNotes !== undefined) updates.formula_notes = body.formulaNotes;
       if (body.version !== undefined) updates.version = body.version;
-      if (body.intendedConcentrationPercent !== undefined) updates.intended_concentration_percent = body.intendedConcentrationPercent;
+      if (body.intendedConcentrationPercent !== undefined) {
+        updates.intended_concentration_percent = body.intendedConcentrationPercent;
+      }
+
       updates.updated_at = new Date().toISOString();
 
       const { data, error } = await supabase
@@ -47,6 +52,7 @@ export default async function handler(req, res) {
         .from('formulas')
         .delete()
         .eq('id', id);
+
       if (error) throw new Error(error.message);
       return res.status(200).json({ success: true });
     }
@@ -57,6 +63,7 @@ export default async function handler(req, res) {
         .select('*, formula_categories(name)')
         .eq('id', id)
         .single();
+
       if (error) throw new Error(error.message);
       return res.status(200).json(data);
     }
