@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
-type AuthMode = 'bearer' | 'missing' | 'query_apikey_not_allowed';
+type AuthMode = 'bearer' | 'query_apikey' | 'missing';
 
 function hasTokenConfigured(): boolean {
   return !!process.env.ASSISTANT_API_TOKEN;
@@ -15,14 +15,17 @@ function getBearerToken(req: any): string {
 function getAuthMode(req: any): AuthMode {
   const bearer = getBearerToken(req);
   if (bearer) return 'bearer';
-  if (req.query?.apikey) return 'query_apikey_not_allowed';
+  if (req.query?.apikey) return 'query_apikey';
   return 'missing';
 }
 
 function checkAuth(req: any): boolean {
   const token = process.env.ASSISTANT_API_TOKEN;
+  const queryApiKey = req.query?.apikey || '';
   if (!token) return false;
-  return getBearerToken(req) === token;
+  if (getBearerToken(req) === token) return true;
+  if (queryApiKey === token) return true;
+  return false;
 }
 
 function buildRequestUrl(req: any): string {
@@ -246,12 +249,8 @@ export default async function handler(req: any, res: any) {
   }
 
   if (!checkAuth(req)) {
-    const authMode = getAuthMode(req);
     return sendError(req, res, 'read', 401, 'UNAUTHORIZED', 'Unauthorized', {
-      hint:
-        authMode === 'query_apikey_not_allowed'
-          ? 'Query apikey is no longer supported. Use Authorization: Bearer <ASSISTANT_API_TOKEN>.'
-          : 'Provide Authorization: Bearer <ASSISTANT_API_TOKEN>.',
+      hint: 'Provide Authorization: Bearer <ASSISTANT_API_TOKEN> or ?apikey=<ASSISTANT_API_TOKEN>.',
     });
   }
 
@@ -368,4 +367,22 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  query 
+  query = query.range(offsetNum, offsetNum + limitNum - 1);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    return sendError(req, res, 'read', 500, 'SUPABASE_QUERY_FAILED', error.message, {
+      table: tableName,
+    });
+  }
+
+  const normalized = (data || []).map((row: any) => normalizeRow(tableName, row));
+
+  return sendSuccess(req, res, 'read', normalized, {
+    table: tableName,
+    count: count ?? normalized.length,
+    limit: limitNum,
+    offset: offsetNum,
+  });
+}
