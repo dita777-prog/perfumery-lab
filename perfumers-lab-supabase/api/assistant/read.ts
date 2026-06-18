@@ -18,7 +18,7 @@ function checkAuth(req: any): boolean {
 function hasTokenConfigured(): boolean { return !!process.env.ASSISTANT_API_TOKEN; }
 
 const TABLE_COLUMNS: Record<string, string> = {
-  formulas: 'id, name, category_id, status, archived_at, intended_concentration_percent, total_batch_grams',
+  formulas: 'id, name, commercial_name, category_id, status, archived_at, intended_concentration_percent, total_batch_grams',
   formula_ingredients: 'id, formula_id, material_id, grams_as_weighed, neat_grams, percent_in_formula, source_type',
   // materials uses a custom join path below — this string is used as fallback only
   materials: 'id, name, treat_as_solvent, status, notes_sensory, strength, tags',
@@ -29,7 +29,7 @@ const TABLE_COLUMNS: Record<string, string> = {
 };
 
 const ALLOWED_ORDER_FIELDS: Record<string, string[]> = {
-  formulas: ['name', 'status', 'archived_at', 'intended_concentration_percent', 'total_batch_grams'],
+  formulas: ['name', 'commercial_name', 'status', 'archived_at', 'intended_concentration_percent', 'total_batch_grams'],
   formula_ingredients: ['formula_id', 'material_id', 'grams_as_weighed'],
   materials: ['name', 'status', 'strength'],
   material_sources: ['stock_grams', 'price_per_gram', 'supplier_id', 'material_id'],
