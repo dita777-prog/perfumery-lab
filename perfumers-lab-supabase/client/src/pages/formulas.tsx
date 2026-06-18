@@ -1210,6 +1210,7 @@ function AddIngredientDialog({ open, onOpenChange, formulaId, materials, allForm
 function CreateFormulaDialog({ open, onOpenChange, categories, onCreated }: any) {
   const { toast } = useToast();
   const [name, setName] = useState("");
+  const [commercialName, setCommercialName] = useState("");
   const [catId, setCatId] = useState("");
   const [showNewCat, setShowNewCat] = useState(false);
   const [newCatName, setNewCatName] = useState("");
@@ -1219,7 +1220,7 @@ function CreateFormulaDialog({ open, onOpenChange, categories, onCreated }: any)
     onSuccess: (newFormula: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
       onOpenChange(false);
-      setName(""); setCatId("");
+      setName(""); setCommercialName(""); setCatId("");
       toast({ title: "Formula created" });     onCreated?.(newFormula.id);
     },
   });
@@ -1240,6 +1241,7 @@ function CreateFormulaDialog({ open, onOpenChange, categories, onCreated }: any)
       <DialogContent className="bg-card border-border">
         <DialogHeader><DialogTitle>New Formula</DialogTitle></DialogHeader>
         <div className="space-y-3">
+          <Input placeholder="Commercial name (optional)" value={commercialName} onChange={e => setCommercialName(e.target.value)} data-testid="input-formula-commercial-name" />
           <Input placeholder="Name" value={name} onChange={e => setName(e.target.value)} data-testid="input-formula-name" />
 
           {!showNewCat ? (
@@ -1265,7 +1267,7 @@ function CreateFormulaDialog({ open, onOpenChange, categories, onCreated }: any)
           )}
 
           <Button className="w-full" disabled={!name || mutation.isPending}
-            onClick={() => mutation.mutate({ name, categoryId: catId || null, productType: null })}
+            onClick={() => mutation.mutate({ name, commercialName: commercialName.trim() || null, categoryId: catId || null, productType: null })}
             data-testid="button-create-formula"
           >
             Create
