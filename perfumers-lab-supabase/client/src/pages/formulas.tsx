@@ -50,6 +50,7 @@ export default function FormulasPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showCatManager, setShowCatManager] = useState(false);
   const [filter, setFilter] = useState("");
+    const [sortBy, setSortBy] = useState<"name" | "updated">("updated");
     const { toast } = useToast();
     const [formulaCtxMenu, setFormulaCtxMenu] = useState<{ x: number; y: number; formula: any } | null>(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -77,14 +78,18 @@ export default function FormulasPage() {
 
   // Filtrovat archivované formule ze seznamu
   const activeFormulas = formulas.filter((f: any) => f.status !== "archive");
+    const sortedFormulas = [...activeFormulas].sort((a: any, b: any) => {
+          if (sortBy === "name") return (a.name || "").localeCompare(b.name || "");
+          return new Date(b.updated_at || b.updatedAt || 0).getTime() - new Date(a.updated_at || a.updatedAt || 0).getTime();
+        });
 
   const grouped = categories.map((c: any) => ({
     category: c,
-    formulas: activeFormulas.filter((f: any) => f.categoryId === c.id)
+    formulas: sortedFormulas.filter((f: any) => f.categoryId === c.id)
       .filter((f: any) => !filter || f.name.toLowerCase().includes(filter.toLowerCase()))
   })).filter(g => g.formulas.length > 0);
   
-  const ungrouped = activeFormulas.filter((f: any) => !f.categoryId)
+  const ungrouped = sortedFormulas.filter((f: any) => !f.categoryId)
     .filter((f: any) => !filter || f.name.toLowerCase().includes(filter.toLowerCase()));
 
   const selected = formulas.find((f: any) => f.id === selectedId);
@@ -104,6 +109,10 @@ export default function FormulasPage() {
         <div className="px-3 py-2">
           <Input placeholder="Filter..." value={filter} onChange={e => setFilter(e.target.value)} className="h-7 text-xs" />
         </div>
+                        <div className="px-3 pb-1 flex gap-1">
+                                      <button onClick={() => setSortBy("name")} className={`text-[10px] px-1.5 py-0.5 rounded ${sortBy === "name" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>A→Z</button>
+                                      <button onClick={() => setSortBy("updated")} className={`text-[10px] px-1.5 py-0.5 rounded ${sortBy === "updated" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>Recent</button>
+                                    </div>
         <div className="flex-1 overflow-y-auto">
           {grouped.map(({ category, formulas: forms }) => (
             <div key={category.id}>
