@@ -12,7 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
-import { fmtNum, fmtGrams, fmtPercent, postJson, patchJson, deleteJson, recalcPercents, calcPyramidBreakdown, scaleToTotalWeight, scaleByFactor, scaleToAbsolutePercent, scalePercentByFactor, isSolventIngredient, calcConcentratePercent, splitAromaticSolventMass } from "@/lib/api";
+import { fmtNum, fmtGrams, fmtPercent, postJson, patchJson, deleteJson, recalcPercents, calcPyramidBreakdown, scaleToTotalWeight, scaleByFactor, scaleToAbsolutePercent, scalePercentByFactor, isSolventIngredient, calcConcentratePercent, splitAromaticSolventMass, formulaSolventGrams } from "@/lib/api";
 import { neatGramsOf, weighedGramsOf, dilutionSolventGrams, neatMultiplierFor, stockDeductionGrams } from "@/lib/dilution";
 
 /** Coerce any value to a string safely (Supabase NUMERIC can return as number or string). */
@@ -584,22 +584,30 @@ updateStatusMut.mutate({ status: newStatus });
         </div>
       )}
 
+      {/* TODO(neat-view): wire a non-destructive "Neat view / Create 100% neat
+          version" action here using computeNeatComposition() from @/lib/api.
+          It returns per-row neat grams + renormalised %, and flags rows whose
+          material is a commercial dilution (isCommercialDilution) so those are
+          surfaced for the user to decide rather than silently overwritten.
+          Deferred from this pass to avoid touching the fragile dialog wiring in
+          this file; the computation is implemented and unit-tested. */}
       {/* Concentration panel — live formulation calculator */}
       {(() => {
         const targetNum = parseFloat(asString(targetConcInput) || asString(formula.intendedConcentrationPercent) || "0");
         const hasTarget = !!targetNum && !isNaN(targetNum) && targetNum > 0;
         const hasAromatic = massSplit.aromaticNeat > 0;
-        const hasAnyMass = hasAromatic || massSplit.solventNeat > 0;
+        // Total solvent = carrier hidden in dilutions + explicit solvent rows.
+        const totalSolvent = formulaSolventGrams(massSplit);
+        const hasAnyMass = totalWeighed > 0;
 
-        const totalNeatMass = massSplit.aromaticNeat + massSplit.solventNeat;
-        const alignmentTolerance = Math.max(0.5, totalNeatMass * 0.01);
+        const alignmentTolerance = Math.max(0.5, totalWeighed * 0.01);
 
         let neededDisplay: any = "—";
         let chip: any = null;
         if (hasTarget && hasAromatic) {
           const requiredTotal = massSplit.aromaticNeat / (targetNum / 100);
           const requiredSolvent = requiredTotal - massSplit.aromaticNeat;
-          const needed = requiredSolvent - massSplit.solventNeat;
+          const needed = requiredSolvent - totalSolvent;
           if (Math.abs(needed) <= alignmentTolerance) {
             neededDisplay = <span className="text-emerald-400">✓ on target</span>;
           } else if (needed > 0) {
@@ -693,9 +701,9 @@ updateStatusMut.mutate({ status: newStatus });
                 {chip && <div>{chip}</div>}
                 {hasAnyMass && (
                   <>
-                    <span>Concentrate: <span className="font-mono text-foreground">{fmtPercent(concentratePct)}</span></span>
-                    <span>Aromatic: <span className="font-mono text-foreground">{fmtGrams(massSplit.aromaticNeat)}</span></span>
-                    <span>Solvent: <span className="font-mono text-foreground">{fmtGrams(massSplit.solventNeat)}</span></span>
+                    <span>Weighed total: <span className="font-mono text-foreground">{fmtGrams(totalWeighed)}</span></span>
+                    <span>Aromatic (neat): <span className="font-mono text-foreground">{fmtGrams(massSplit.aromaticNeat)}</span></span>
+                    <span>Solvent in dilutions: <span className="font-mono text-foreground">{fmtGrams(totalSolvent)}</span></span>
                   </>
                 )}
               </div>

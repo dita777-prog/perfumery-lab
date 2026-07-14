@@ -1,22 +1,36 @@
 import { queryClient } from "./queryClient";
 import { supabase } from "./supabase";
-import type { Material, FormulaIngredient } from "@shared/schema";
-import { neatGramsOf, weighedGramsOf } from "./dilution";
+import type { Material } from "@shared/schema";
+import { neatGramsOf } from "./dilution";
+import {
+  type SolventIngredient,
+  type MassSplit,
+  type NeatCompositionRow,
+  calcNeatGrams,
+  calcPercentInFormula,
+  calcNeatMultiplier,
+  isSolventIngredient,
+  splitAromaticSolventMass,
+  formulaSolventGrams,
+  calcConcentratePercent,
+  isCommercialDilutionMaterial,
+  computeNeatComposition,
+} from "./concentration";
 
-// Subset of FormulaIngredient fields the solvent helpers actually read.
-// Accepting a partial shape keeps the helpers usable with preview objects
-// (which may not carry every DB field) without resorting to `any`.
-export type SolventIngredient = Pick<
-  FormulaIngredient,
-  "materialId" | "gramsAsWeighed" | "neatGrams" | "percentInFormula"
-> & { id?: string; [key: string]: unknown };
-
-export type MassSplit = {
-  aromaticNeat: number;
-  solventNeat: number;
-  aromaticWeighed: number;
-  solventWeighed: number;
+// Re-exported from ./concentration (pure, side-effect-free math module) so
+// existing `@/lib/api` imports keep working.
+export {
+  calcNeatGrams,
+  calcPercentInFormula,
+  calcNeatMultiplier,
+  isSolventIngredient,
+  splitAromaticSolventMass,
+  formulaSolventGrams,
+  calcConcentratePercent,
+  isCommercialDilutionMaterial,
+  computeNeatComposition,
 };
+export type { SolventIngredient, MassSplit, NeatCompositionRow };
 
 export type ScaledIngredient = SolventIngredient & {
   gramsAsWeighed: string;
@@ -217,72 +231,12 @@ export async function searchAll(query: string): Promise<{ materials: any[]; form
 }
 
 // ============ Formula calculation utilities ============
-export function calcNeatGrams(gramsAsWeighed: number, neatMultiplier: number): number {
-  return gramsAsWeighed * neatMultiplier;
-}
-
-export function calcPercentInFormula(neatGrams: number, totalNeatGrams: number): number {
-  if (totalNeatGrams === 0) return 0;
-  return (neatGrams / totalNeatGrams) * 100;
-}
-
-export function calcNeatMultiplier(dilutionPercent: number): number {
-  return dilutionPercent / 100;
-}
-
-// ─── Solvent-awareness helpers ──────────────────────────────────
-// A single source of truth for "is this ingredient a solvent?" — reads
-// treatAsSolvent off the material the ingredient points to.
-export function isSolventIngredient(
-  ing: SolventIngredient | null | undefined,
-  materials: Material[],
-): boolean {
-  if (!ing?.materialId) return false;
-  const mat = materials?.find((m) => m.id === ing.materialId);
-  return !!mat?.treatAsSolvent;
-}
+// calcNeatGrams / calcPercentInFormula / calcNeatMultiplier / isSolventIngredient
+// / splitAromaticSolventMass / formulaSolventGrams / calcConcentratePercent live
+// in ./concentration and are re-exported above.
 
 function ingNeat(ing: SolventIngredient): number {
   return neatGramsOf(ing);
-}
-
-function ingWeighed(ing: SolventIngredient): number {
-  return weighedGramsOf(ing);
-}
-
-// Sum masses split by solvent flag. Returns neat-grams sums.
-export function splitAromaticSolventMass(
-  ingredients: SolventIngredient[],
-  materials: Material[],
-): MassSplit {
-  let aromaticNeat = 0;
-  let solventNeat = 0;
-  let aromaticWeighed = 0;
-  let solventWeighed = 0;
-  for (const ing of ingredients) {
-    const neat = ingNeat(ing);
-    const weighed = ingWeighed(ing);
-    if (isSolventIngredient(ing, materials)) {
-      solventNeat += neat;
-      solventWeighed += weighed;
-    } else {
-      aromaticNeat += neat;
-      aromaticWeighed += weighed;
-    }
-  }
-  return { aromaticNeat, solventNeat, aromaticWeighed, solventWeighed };
-}
-
-// Actual concentrate percentage given current ingredient masses.
-// concentrate% = aromatic / (aromatic + solvent) × 100
-export function calcConcentratePercent(
-  ingredients: SolventIngredient[],
-  materials: Material[],
-): number {
-  const { aromaticNeat, solventNeat } = splitAromaticSolventMass(ingredients, materials);
-  const denom = aromaticNeat + solventNeat;
-  if (denom <= 0) return 0;
-  return (aromaticNeat / denom) * 100;
 }
 
 // Scaling functions
