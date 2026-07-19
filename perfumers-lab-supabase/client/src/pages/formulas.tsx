@@ -718,6 +718,7 @@ updateStatusMut.mutate({ status: newStatus });
         enriched={enriched}
         ingredients={ingredients}
         materials={materials}
+        materialSources={materialSources}
         dilutions={dilutions}
         allFormulas={allFormulas}
         totalWeighed={totalWeighed}
@@ -830,7 +831,7 @@ updateStatusMut.mutate({ status: newStatus });
 }
 
 // ─── Ingredient Table (main working surface) ────────────────────
-function IngredientTable({ formulaId, enriched, ingredients, materials, dilutions, allFormulas, totalWeighed, totalNeat, totalPercent, onAddClick, onMaterialClick }: any) {
+function IngredientTable({ formulaId, enriched, ingredients, materials, materialSources, dilutions, allFormulas, totalWeighed, totalNeat, totalPercent, onAddClick, onMaterialClick }: any) {
   const { toast } = useToast();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; ing: any } | null>(null);
   const [changeMatDialog, setChangeMatDialog] = useState(null);
@@ -882,6 +883,30 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
       // Default je 100% (NEAT) pro materiály i formuly/accordy
   return "100%";
     }
+
+  // ─── Stock status (Sklad) column ───────────────────────────────
+  // Suma skladové zásoby materiálu přes všechny zdroje/dodavatele.
+  function getMaterialStock(materialId: string): number {
+    return (materialSources || [])
+      .filter((s: any) => s.materialId === materialId)
+      .reduce((sum: number, s: any) => sum + (parseFloat(s.stockGrams || "0") || 0), 0);
+  }
+
+  // Stav skladu pro danou ingredienci vzhledem k aktuální velikosti formule.
+  // Sklad materiálů se vede jako čistá (neat) aromatická látka, takže se
+  // porovnává proti stockDeductionGrams (= neatGramsOf), stejně jako u
+  // Create Production Batch.
+  function getStockStatus(ing: any): { stock: number | null; needed: number; status: "none" | "insufficient" | "low" | "ok" } | null {
+    if (!ing.materialId) return null; // accordy/sub-formulace nejsou vedeny ve skladu materiálů
+    const stock = getMaterialStock(ing.materialId);
+    const needed = stockDeductionGrams(ing);
+    if (needed <= 0) return { stock, needed, status: "ok" };
+    let status: "insufficient" | "low" | "ok";
+    if (stock < needed) status = "insufficient";
+    else if (stock < needed * 1.15) status = "low";
+    else status = "ok";
+    return { stock, needed, status };
+  }
 
   function handleGramsSave(ingId: string) {
     const g = parseEuroInput(gramsValue);
@@ -937,7 +962,8 @@ function IngredientTable({ formulaId, enriched, ingredients, materials, dilution
             <th className="text-center p-2" style={{ width: 90 }}>Dilution</th>
             <th className="text-right p-2" style={{ width: 90 }}>Weighed</th>
             <th className="text-right p-2" style={{ width: 80 }}>Neat</th>
-            <th className="text-right p-2 pr-3" style={{ width: 75 }}>%</th>
+            <th className="text-right p-2" style={{ width: 75 }}>%</th>
+            <th className="text-right p-2 pr-3" style={{ width: 95 }}>Sklad</th>
           </tr>
         </thead>
         <tbody>
@@ -1013,7 +1039,32 @@ className={ (matDilutions.length > 0 || ing.sourceFormulaId) ? 'cursor-pointer h
                 </td>
 
                 <td className="text-right p-2 font-mono text-xs">{fmtGrams(neatGramsOf(ing))}</td>
-                <td className="text-right p-2 pr-3 font-mono text-xs">{fmtPercent(ing.percentInFormula)}</td>
+                <td className="text-right p-2 font-mono text-xs">{fmtPercent(ing.percentInFormula)}</td>
+
+                {/* Sklad — barevný stav zásoby vůči potřebě aktuální šarže */}
+                <td className="text-right p-2 pr-3">
+                  {(() => {
+                    const info = getStockStatus(ing);
+                    if (!info) return <span className="text-muted-foreground text-xs">—</span>;
+                    const colorClass =
+                      info.status === "insufficient" ? "text-red-500" :
+                      info.status === "low" ? "text-amber-500" :
+                      "text-emerald-500";
+                    const dotClass =
+                      info.status === "insufficient" ? "bg-red-500" :
+                      info.status === "low" ? "bg-amber-500" :
+                      "bg-emerald-500";
+                    return (
+                      <span
+                        className={`inline-flex items-center gap-1 justify-end font-mono text-xs ${colorClass}`}
+                        title={`Potřeba (neat): ${info.needed.toFixed(3)} g · Skladem: ${(info.stock ?? 0).toFixed(3)} g`}
+                      >
+                        <span className={`inline-block w-1.5 h-1.5 rounded-full ${dotClass}`} />
+                        {fmtGrams(info.stock ?? 0)}
+                      </span>
+                    );
+                  })()}
+                </td>
               </tr>
             );
           })}
@@ -1024,7 +1075,8 @@ className={ (matDilutions.length > 0 || ing.sourceFormulaId) ? 'cursor-pointer h
             <td></td>
             <td className="text-right p-2 font-mono text-xs">{fmtGrams(totalWeighed)}</td>
             <td className="text-right p-2 font-mono text-xs">{fmtGrams(totalNeat)}</td>
-            <td className="text-right p-2 pr-3 font-mono text-xs">{fmtPercent(totalPercent)}</td>
+            <td className="text-right p-2 font-mono text-xs">{fmtPercent(totalPercent)}</td>
+            <td className="pr-3"></td>
           </tr>
         </tfoot>
       </table>
