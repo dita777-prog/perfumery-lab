@@ -604,14 +604,24 @@ updateStatusMut.mutate({ status: newStatus });
 
         let neededDisplay: any = "—";
         let chip: any = null;
+        // At a 100% target there is, by definition, no solvent budget at all —
+        // requiredSolvent is always 0. Any carrier that shows up here comes
+        // from commercially pre-diluted raw materials (e.g. Benzoin Resinoid
+        // 50% DPG, Furaneol 15% TEC) that simply aren't sold neat. That carrier
+        // is physically unavoidable, so it isn't something to "fix" — treat it
+        // as neutral information rather than an alarming excess/warning.
+        const isFullConcentrateTarget = hasTarget && Math.abs(targetNum - 100) < 0.01;
         if (hasTarget && hasAromatic) {
           const requiredTotal = massSplit.aromaticNeat / (targetNum / 100);
           const requiredSolvent = requiredTotal - massSplit.aromaticNeat;
           const needed = requiredSolvent - totalSolvent;
+          const isCarrierFromRawMaterials = isFullConcentrateTarget && needed < -alignmentTolerance;
           if (Math.abs(needed) <= alignmentTolerance) {
             neededDisplay = <span className="text-emerald-400">✓ on target</span>;
           } else if (needed > 0) {
             neededDisplay = <span className="text-amber-400">+{fmtGrams(needed)}</span>;
+          } else if (isCarrierFromRawMaterials) {
+            neededDisplay = <span className="text-muted-foreground">{fmtGrams(Math.abs(needed))} carrier (in materials)</span>;
           } else {
             neededDisplay = <span className="text-orange-400">−{fmtGrams(Math.abs(needed))} excess</span>;
           }
@@ -625,6 +635,12 @@ updateStatusMut.mutate({ status: newStatus });
             chip = (
               <Badge variant="outline" className="border-amber-700 bg-amber-900/30 text-amber-300">
                 Needs {fmtGrams(needed)} solvent
+              </Badge>
+            );
+          } else if (isCarrierFromRawMaterials) {
+            chip = (
+              <Badge variant="outline" className="border-border bg-secondary/50 text-muted-foreground">
+                Includes {fmtGrams(Math.abs(needed))} carrier solvent from pre-diluted materials
               </Badge>
             );
           } else if (needed < -alignmentTolerance) {
