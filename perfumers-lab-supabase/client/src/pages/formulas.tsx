@@ -1,1 +1,2667 @@
-<<FULL_CONTENT>>
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Plus, Copy, Scale, AlertTriangle, Pencil, Tag, Trash2, ChevronDown, ArrowLeft, Info, Archive, FlaskConical } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useToast } from "@/hooks/use-toast";
+import { fmtNum, fmtGrams, fmtPercent, postJson, patchJson, deleteJson, recalcPercents, calcPyramidBreakdown, scaleToTotalWeight, scaleByFactor, scaleToAbsolutePercent, scalePercentByFactor, isSolventIngredient, calcConcentratePercent, splitAromaticSolventMass, formulaSolventGrams } from "@/lib/api";
+import { neatGramsOf, weighedGramsOf, dilutionSolventGrams, neatMultiplierFor, stockDeductionGrams } from "@/lib/dilution";
+
+/** Coerce any value to a string safely (Supabase NUMERIC can return as number or string). */
+function asString(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  return typeof v === "string" ? v : String(v);
+}
+
+/** Parse European-style number input (accept both comma and dot as decimal separator) */
+function parseEuroInput(val: unknown): number {
+  // Replace comma with dot for parsing; coerce non-strings (Supabase may return number for NUMERIC)
+  const normalized = asString(val).replace(",", ".");
+  return parseFloat(normalized);
+}
+
+function generateBatchLabel(formulaName: string, existingBatches: any[]): string {
+  const today = new Date();
+  const dateStr = today.toISOString().slice(0, 10);
+  const slug = (formulaName || "Formula").replace(/\s+/g, "-").replace(/[^\w-]/g, "").replace(/-+/g, "-");
+  const prefix = `${dateStr}-${slug}-`;
+  const existing = (existingBatches || [])
+    .map((b: any) => b.batchLabel || b.batch_label || "")
+    .filter((label: string) => label.toLowerCase().startsWith(prefix.toLowerCase()));
+  let maxSuffix = 0;
+  for (const label of existing) {
+    const n = parseInt(label.slice(prefix.length), 10);
+    if (!isNaN(n) && n > maxSuffix) maxSuffix = n;
+  }
+  return `${prefix}${String(maxSuffix + 1).padStart(2, "0")}`;
+}
+
+export default function FormulasPage() {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [viewingMaterialId, setViewingMaterialId] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showCatManager, setShowCatManager] = useState(false);
+  const [filter, setFilter] = useState("");
+    const [sortBy, setSortBy] = useState<"name" | "updated">("updated");
+    const { toast } = useToast();
+    const [formulaCtxMenu, setFormulaCtxMenu] = useState<{ x: number; y: number; formula: any } | null>(null);
+    const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+    const deleteFormulaMut = useMutation({
+          mutationFn: (id: string) => deleteJson(`/api/formulas/${id}`),
+          onSuccess: () => {
+                  queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+                  setConfirmDeleteId(null);
+                  setSelectedId(null);
+                  toast({ title: "Formula deleted" });
+                },
+          onError: (err: any) => {
+      setConfirmDeleteId(null);
+      toast({ title: "Failed to delete formula", description: err?.message || "Unknown error", variant: "destructive" });
+    },
+        });
+    useEffect(() => {
+          const handler = () => setFormulaCtxMenu(null);
+          if (formulaCtxMenu) window.addEventListener("click", handler);
+          return () => window.removeEventListener("click", handler);
+        }, [formulaCtxMenu]);
+
+  const { data: formulas = [] } = useQuery<any[]>({ queryKey: ["/api/formulas"] });
+  const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/formula-categories"] });
+
+  // Filtrovat archivované formule ze seznamu
+  const activeFormulas = formulas.filter((f: any) => f.status !== "archive");
+    const sortedFormulas = [...activeFormulas].sort((a: any, b: any) => {
+          if (sortBy === "name") return (a.name || "").localeCompare(b.name || "");
+          return new Date(b.updated_at || b.updatedAt || 0).getTime() - new Date(a.updated_at || a.updatedAt || 0).getTime();
+        });
+
+  const grouped = categories.map((c: any) => ({
+    category: c,
+    formulas: sortedFormulas.filter((f: any) => f.categoryId === c.id)
+      .filter((f: any) => !filter || f.name.toLowerCase().includes(filter.toLowerCase()))
+  })).filter(g => g.formulas.length > 0);
+  
+  const ungrouped = sortedFormulas.filter((f: any) => !f.categoryId)
+    .filter((f: any) => !filter || f.name.toLowerCase().includes(filter.toLowerCase()));
+
+  const selected = formulas.find((f: any) => f.id === selectedId);
+
+  return (
+    <div className="panel-layout h-full">
+            <div className={`border-r border-border flex flex-col h-full overflow-hidden ${selectedId ? 'hidden md:flex' : 'flex'}`}>
+        <div className="py-3 pr-3 pl-14 md:pl-3 border-b border-border flex items-center gap-2">
+          <h2 className="text-sm font-semibold flex-1">Formulas</h2>
+          <Button size="sm" variant="ghost" onClick={() => setShowCatManager(true)} data-testid="button-category-manager" title="Category Manager">
+            <Tag size={14} />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setShowCreate(true)} data-testid="button-add-formula">
+            <Plus size={14} />
+          </Button>
+        </div>
+        <div className="px-3 py-2">
+          <Input placeholder="Filter..." value={filter} onChange={e => setFilter(e.target.value)} className="h-7 text-xs" />
+        </div>
+                        <div className="px-3 pb-1 flex gap-1">
+                                      <button onClick={() => setSortBy("name")} className={`text-[10px] px-1.5 py-0.5 rounded ${sortBy === "name" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>A→Z</button>
+                                      <button onClick={() => setSortBy("updated")} className={`text-[10px] px-1.5 py-0.5 rounded ${sortBy === "updated" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>Recent</button>
+                                    </div>
+        <div className="flex-1 overflow-y-auto">
+          {grouped.map(({ category, formulas: forms }) => (
+            <div key={category.id}>
+              <div className="px-3 py-2 text-[13px] font-semibold uppercase tracking-wider text-[#60a5fa] bg-secondary/50">
+                {category.name}
+              </div>
+              {forms.map((f: any) => (
+                <div key={f.id}
+                  className={`flex items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50 transition-colors border-b border-border/30
+                    ${selectedId === f.id ? 'bg-[hsl(183,70%,36%)]/10 text-[hsl(183,70%,50%)]' : 'text-foreground/80'}`}
+                  onClick={() => { setSelectedId(f.id); setViewingMaterialId(null); }}
+                                  onContextMenu={(e) => { e.preventDefault(); setFormulaCtxMenu({ x: e.clientX, y: e.clientY, formula: f }); }}
+                  data-testid={`formula-item-${f.id}`}
+                >
+                  <span className="truncate flex-1">{f.name}</span>{f.createdAt && <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">{new Date(f.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>}
+                </div>
+              ))}
+            </div>
+          ))}
+          {ungrouped.length > 0 && (
+            <div>
+              <div className="px-3 py-2 text-[13px] font-semibold uppercase tracking-wider text-[#60a5fa] bg-secondary/50">Uncategorized</div>
+              {ungrouped.map((f: any) => (
+                <div key={f.id}
+                  className={`flex items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50 border-b border-border/30
+                    ${selectedId === f.id ? 'bg-[hsl(183,70%,36%)]/10' : ''}`}
+                  onClick={() => { setSelectedId(f.id); setViewingMaterialId(null); }}
+                                onContextMenu={(e) => { e.preventDefault(); setFormulaCtxMenu({ x: e.clientX, y: e.clientY, formula: f }); }}
+                >
+                  <span className="truncate flex-1">{f.name}</span>{f.createdAt && <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">{new Date(f.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className={`flex-1 overflow-y-auto ${selectedId ? '' : 'hidden md:block'}`}>
+        {viewingMaterialId ? <MaterialCardView materialId={viewingMaterialId} onBack={() => setViewingMaterialId(null)} /> : selected ? <><button onClick={() => setSelectedId(null)} className="md:hidden flex items-center gap-1 pl-14 md:pl-3 pr-3 pt-3 text-sm text-muted-foreground"><ArrowLeft size={16} /> Back</button><FormulaDetail formula={selected} onBack={() => setSelectedId(null)} onMaterialClick={(id: string) => setViewingMaterialId(id)} onSelectFormula={(id: string) => { setSelectedId(id); setViewingMaterialId(null); }} /></> : (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">Select a formula</div>
+        )}
+              </div>
+            
+      <CreateFormulaDialog open={showCreate} onOpenChange={setShowCreate} categories={categories} onCreated={(id) => setSelectedId(id)} />
+      <CategoryManagerDialog open={showCatManager} onOpenChange={setShowCatManager} />
+            {/* Formula context menu */}
+            {formulaCtxMenu && (
+              <div
+                          className="fixed bg-popover border border-border rounded-lg shadow-lg py-1 z-50 min-w-[180px]"
+                          style={{ left: formulaCtxMenu.x, top: formulaCtxMenu.y }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <button
+                                        className="block w-full text-left px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 transition-colors"
+                                        onClick={() => { setConfirmDeleteId(formulaCtxMenu.formula.id); setFormulaCtxMenu(null); }}
+                                      >
+                                        <Trash2 size={12} className="inline mr-1.5" /> Delete formula
+                                      </button>
+                        </div>
+            )}
+            {/* Delete confirmation dialog */}
+            <Dialog open={!!confirmDeleteId} onOpenChange={(v) => { if (!v) setConfirmDeleteId(null); }}>
+                      <DialogContent className="bg-card border-border max-w-sm">
+                                  <DialogHeader><DialogTitle>Delete Formula</DialogTitle></DialogHeader>
+                                  <p className="text-sm text-muted-foreground">Are you sure you want to delete this formula? This action cannot be undone.</p>
+                                  <div className="flex gap-2 justify-end mt-3">
+                                                <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+                                                <Button variant="destructive" disabled={deleteFormulaMut.isPending} onClick={() => confirmDeleteId && deleteFormulaMut.mutate(confirmDeleteId)}>
+                                                                {deleteFormulaMut.isPending ? "Deleting..." : "Delete"}
+                                                              </Button>
+                                              </div>
+                                </DialogContent>
+                    </Dialog>
+    </div>
+  );
+}
+
+// ─── Formula Detail ─────────────────────────────────────────────
+function FormulaDetail({ formula, onBack, onMaterialClick, onSelectFormula }: { formula: any; onBack?: () => void; onMaterialClick?: (id: string) => void; onSelectFormula?: (id: string) => void }) {
+  const { toast } = useToast();
+  const [showScale, setShowScale] = useState(false);
+  const [showDupDialog, setShowDupDialog] = useState(false);
+  const [showAddIngredient, setShowAddIngredient] = useState(false);
+  const [showCreateBatch, setShowCreateBatch] = useState(false);
+    const [editingName, setEditingName] = useState(false);
+    const [nameValue, setNameValue] = useState(formula.name);
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [notesText, setNotesText] = useState(formula.formulaNotes || "");
+  const [targetConcInput, setTargetConcInput] = useState<string>(asString(formula.intendedConcentrationPercent));
+
+  const { data: ingredients = [] } = useQuery<any[]>({ queryKey: ["/api/formulas", formula.id, "ingredients"] });
+    const nameInputRef = useRef<HTMLInputElement>(null);
+  const { data: materials = [] } = useQuery<any[]>({ queryKey: ["/api/materials"] });
+  const { data: families = [] } = useQuery<any[]>({ queryKey: ["/api/olfactive-families"] });
+  const { data: dilutions = [] } = useQuery<any[]>({ queryKey: ["/api/dilutions"] });
+  const { data: allFormulas = [] } = useQuery<any[]>({ queryKey: ["/api/formulas"] });
+  const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/formula-categories"] });
+  const { data: materialSources = [] } = useQuery<any[]>({ queryKey: ["/api/material-sources"] });
+  const { data: productionBatches = [] } = useQuery<any[]>({ queryKey: ["/api/production-batches"] });
+  const { data: formulaInventoryMovements = [] } = useQuery<any[]>({ queryKey: ["/api/formula-inventory-movements"] });
+
+  // Reset notes when formula changes
+  useEffect(() => { setNotesText(formula.formulaNotes || ""); setEditingNotes(false); setNameValue(formula.name); setEditingName(false); setTargetConcInput(asString(formula.intendedConcentrationPercent)); }, [formula.id]);
+
+  // Keep target input in sync if the formula record updates externally (e.g. scaling).
+  useEffect(() => {
+    setTargetConcInput(asString(formula.intendedConcentrationPercent));
+  }, [formula.intendedConcentrationPercent]);
+
+  const updateTargetMut = useMutation({
+    mutationFn: (value: string | null) => patchJson(`/api/formulas/${formula.id}`, { intendedConcentrationPercent: value }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+    },
+  });
+
+  // ─── Target concentration: inline validation + debounced autosave ───
+  const targetRaw = asString(targetConcInput).trim();
+  const targetParsed = targetRaw === "" ? NaN : parseEuroInput(targetRaw);
+  const targetIsValid =
+    targetRaw === "" || (!isNaN(targetParsed) && targetParsed > 0 && targetParsed <= 100);
+
+  const [saveStatus, setSaveStatus] = useState<"idle" | "pending" | "saved" | "error">("idle");
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedFlashRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const computeNormalized = useCallback((raw: string): string | null | undefined => {
+    // undefined = no-op (same as stored), null = clear, string = new value
+    const stored = asString(formula.intendedConcentrationPercent);
+    if (raw === "") {
+      return stored === "" ? undefined : null;
+    }
+    const n = parseEuroInput(raw);
+    if (isNaN(n) || n <= 0 || n > 100) return undefined;
+    const normalized = n.toFixed(2);
+    if (normalized === stored) return undefined;
+    return normalized;
+  }, [formula.intendedConcentrationPercent]);
+
+  const runSave = useCallback((raw: string) => {
+    const next = computeNormalized(raw);
+    if (next === undefined) {
+      setSaveStatus("idle");
+      return;
+    }
+    setSaveStatus("pending");
+    patchJson(`/api/formulas/${formula.id}`, { intendedConcentrationPercent: next })
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+        setSaveStatus("saved");
+        if (savedFlashRef.current) clearTimeout(savedFlashRef.current);
+        savedFlashRef.current = setTimeout(() => setSaveStatus("idle"), 1500);
+      })
+      .catch(() => {
+        setSaveStatus("error");
+      });
+  }, [formula.id, computeNormalized]);
+
+  // Debounce on every valid change
+  useEffect(() => {
+    if (!targetIsValid) {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      return;
+    }
+    const next = computeNormalized(targetRaw);
+    if (next === undefined) return; // nothing to save
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setSaveStatus("pending");
+    saveTimerRef.current = setTimeout(() => {
+      runSave(targetRaw);
+    }, 500);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [targetRaw, targetIsValid, computeNormalized, runSave]);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (savedFlashRef.current) clearTimeout(savedFlashRef.current);
+    };
+  }, []);
+
+  const flushTargetSave = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    if (!targetIsValid) return;
+    runSave(targetRaw);
+  }, [targetRaw, targetIsValid, runSave]);
+
+  const enriched = recalcPercents(ingredients, materials);
+  const totalWeighed = ingredients.reduce((s: number, i: any) => s + weighedGramsOf(i), 0);
+  const totalNeat = ingredients.reduce((s: number, i: any) => s + neatGramsOf(i), 0);
+  // Sum only aromatic percentages for the warning; solvents are shown as
+  // % of the whole batch so they shouldn't count toward the 100% total.
+  const totalPercent = enriched.reduce((s: number, i: any) => {
+    if (isSolventIngredient(i, materials)) return s;
+    return s + parseFloat(i.percentInFormula || "0");
+  }, 0);
+  const concentratePct = calcConcentratePercent(ingredients, materials);
+  const massSplit = splitAromaticSolventMass(ingredients, materials);
+  const pyramid = calcPyramidBreakdown(ingredients, materials);
+
+    // ─── Exchange Solvent Calculation ───────────────────────────
+  // For each solvent ingredient (material with treatAsSolvent), calculate how much
+  // of that solvent is already contributed by dilutions of other ingredients.
+  const exchangeSolvent = (() => {
+    // Find all ingredients that ARE solvents (their material has treatAsSolvent=true)
+    const solventIngredients = ingredients.filter((ing: any) => {
+      if (!ing.materialId) return false;
+      const mat = materials.find((m: any) => m.id === ing.materialId);
+      return mat?.treatAsSolvent === true;
+    });
+    if (solventIngredients.length === 0) return [];
+
+    // For each solvent ingredient, find how much of that solvent comes from dilutions
+    const result: { solventName: string; solventMaterialId: string; weighedGrams: number; contributedBySolvent: number; adjustedGrams: number }[] = [];
+
+    for (const solventIng of solventIngredients) {
+      const solventMat = materials.find((m: any) => m.id === solventIng.materialId);
+      const solventName = solventMat?.name || "Unknown";
+      const weighedGrams = weighedGramsOf(solventIng);
+
+      // Sum solvent contributed by dilutions of other ingredients
+      let contributedBySolvent = 0;
+      for (const ing of ingredients) {
+        if (ing.id === solventIng.id) continue; // skip the solvent itself
+        if (!ing.dilutionId) continue; // only diluted ingredients contribute solvent
+        const dil = dilutions.find((d: any) => d.id === ing.dilutionId);
+        if (!dil) continue;
+        // Check if this dilution's solvent matches our solvent material
+        const dilSolventMatches = dil.solventMaterialId === solventIng.materialId;
+        // Fallback: match by name if solventMaterialId is not set
+        const dilSolventNameMatches = !dil.solventMaterialId && dil.solventName && (() => { const etoh = ["etoh","ethanol","alcohol","perfumers alcohol"]; const dpg = ["dpg","dipropylene glycol"]; const ipm = ["ipm","isopropyl myristate"]; const sn = solventName.toLowerCase(); const dn = dil.solventName.toLowerCase(); if (sn.includes(dn) || dn.includes(sn)) return true; for (const group of [etoh, dpg, ipm]) { if (group.some(a => sn.includes(a)) && group.some(a => dn.includes(a))) return true; } return false; })();
+        if (!dilSolventMatches && !dilSolventNameMatches) continue;
+        // Solvent contributed by this diluted ingredient = weighed - neat.
+        // Derived from neatGrams (persisted per-ingredient) rather than the
+        // dilution's stored percent, so the number stays correct even if the
+        // dilution row's numbers drift.
+        contributedBySolvent += dilutionSolventGrams(ing);
+      }
+
+      result.push({
+        solventName,
+        solventMaterialId: solventIng.materialId,
+        weighedGrams,
+        contributedBySolvent: Math.round(contributedBySolvent * 1000) / 1000,
+        adjustedGrams: Math.round(Math.max(0, weighedGrams - contributedBySolvent) * 1000) / 1000,
+      });
+    }
+    return result;
+  })();
+
+  const warnings: string[] = [];
+  if (Math.abs(totalPercent - 100) > 2 && ingredients.length > 0) {
+    warnings.push(`Total is ${fmtNum(totalPercent)}% (not ~100%)`);
+  }
+
+  const catName = categories.find((c: any) => c.id === formula.categoryId)?.name;
+  const [catOpen, setCatOpen] = useState(false);
+  const [newCatInline, setNewCatInline] = useState(false);
+  const [newCatInlineName, setNewCatInlineName] = useState("");
+
+  const updateCategoryMut = useMutation({
+    mutationFn: (categoryId: string | null) => patchJson(`/api/formulas/${formula.id}`, { categoryId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+      setCatOpen(false);
+    },
+  });
+
+  const updateFormulaRoleMut = useMutation({
+    mutationFn: (formulaRole: string) => patchJson(`/api/formulas/${formula.id}`, { formulaRole }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+    },
+  });
+
+  const createCatInlineMut = useMutation({
+    mutationFn: (data: any) => postJson("/api/formula-categories", data),
+    onSuccess: (newCat: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formula-categories"] });
+      updateCategoryMut.mutate(newCat.id);
+      setNewCatInline(false);
+      setNewCatInlineName("");
+    },
+  });
+
+  const dupMutation = useMutation({
+    mutationFn: ({ id, name }: any) => postJson<any>(`/api/formulas/${id}/duplicate`, { name }),
+    onSuccess: (newFormula: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/formula-ingredients"] });
+      setShowDupDialog(false);
+      toast({ title: "Formula duplicated" });
+      if (newFormula?.id) onSelectFormula?.(newFormula.id);
+    },
+    onError: (err: any) => {
+      toast({ title: "Failed to duplicate formula", description: err?.message || "Unknown error", variant: "destructive" });
+    },
+  });
+
+
+    const renameMut = useMutation({
+          mutationFn: (name: string) => patchJson(`/api/formulas/${formula.id}`, { name }),
+          onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/formulas"] }); setEditingName(false); toast({ title: "Formula renamed" }); },
+        });
+  const saveNotesMut = useMutation({
+    mutationFn: (notes: string) => patchJson(`/api/formulas/${formula.id}`, { formulaNotes: notes || null }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+      setEditingNotes(false);
+      toast({ title: "Notes saved" });
+    },
+  });
+
+    const updateStatusMut = useMutation({
+    mutationFn: ({ status, archivedAt }: { status: string; archivedAt?: string }) => 
+      patchJson(`/api/formulas/${formula.id}`, { status, archivedAt }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+      toast({ title: "Formula status updated" });
+    },
+  });
+
+  return (
+    <div className="p-6 max-w-4xl">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+
+                  {/* Status switcher */}
+        <div className="flex items-center gap-2 text-xs mb-4">
+          <span className="text-muted-foreground">Status:</span>
+          <button
+            className={`px-2 py-0.5 rounded text-xs transition-colors ${
+              formula.status === "active" || !formula.status
+                ? "bg-[hsl(183,70%,50%)] text-black"
+                : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+            }`}
+            onClick={() => {
+              const newStatus = "active";
+updateStatusMut.mutate({ status: newStatus });
+                      }}
+                      >
+            Active
+          </button>
+          <button
+            className={`px-2 py-0.5 rounded text-xs transition-colors ${
+              formula.status === "archive"
+                ? "bg-[hsl(183,70%,50%)] text-black"
+                : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+            }`}
+            onClick={() => {
+              const newStatus = "archive";
+        updateStatusMut.mutate({ status: newStatus, archivedAt: new Date().toISOString() });
+            }}
+          >
+            <Archive size={12} className="inline mr-1" />
+            Archive
+          </button>
+        </div>
+                    {editingName ? (<input ref={nameInputRef} className="text-xl font-semibold bg-transparent border-b-2 border-[hsl(183,70%,50%)] outline-none w-full" value={nameValue} onChange={e => setNameValue(e.target.value)} onBlur={() => { const t = nameValue.trim(); if (t && t !== formula.name) renameMut.mutate(t); else setEditingName(false); }} onKeyDown={e => { if (e.key === "Enter") { e.currentTarget.blur(); } if (e.key === "Escape") { setNameValue(formula.name); setEditingName(false); } }} autoFocus />) : (<h1 className="text-xl font-semibold cursor-pointer hover:text-[hsl(183,70%,50%)] transition-colors group" data-testid="text-formula-name" onClick={() => setEditingName(true)} title="Click to rename">{formula.name} <Pencil size={14} className="inline ml-1 opacity-0 group-hover:opacity-100 transition-opacity" /></h1>)}
+          {/* Category dropdown label */}
+          <Popover open={catOpen} onOpenChange={(v) => { setCatOpen(v); if (!v) { setNewCatInline(false); setNewCatInlineName(""); } }}>
+            <PopoverTrigger asChild>
+              <button className="flex items-center gap-1 mt-1 text-xs text-muted-foreground hover:text-foreground transition-colors" data-testid="button-formula-category">
+                <span>Category: <span className="font-medium text-foreground">{catName || "Uncategorized"}</span></span>
+                <ChevronDown size={12} />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56 p-1" align="start">
+              <div className="max-h-52 overflow-y-auto">
+                <button
+                  className={`w-full text-left px-3 py-1.5 text-xs rounded hover:bg-secondary transition-colors ${!formula.categoryId ? 'text-[hsl(183,70%,50%)] font-medium' : 'text-foreground'}`}
+                  onClick={() => updateCategoryMut.mutate(null)}
+                >
+                  Uncategorized
+                </button>
+                {categories.map((c: any) => (
+                  <button
+                    key={c.id}
+                    className={`w-full text-left px-3 py-1.5 text-xs rounded hover:bg-secondary transition-colors ${formula.categoryId === c.id ? 'text-[hsl(183,70%,50%)] font-medium' : 'text-foreground'}`}
+                    onClick={() => updateCategoryMut.mutate(c.id)}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+              <div className="border-t border-border mt-1 pt-1">
+                {newCatInline ? (
+                  <div className="flex gap-1 px-2 pb-1">
+                    <Input
+                      value={newCatInlineName}
+                      onChange={e => setNewCatInlineName(e.target.value)}
+                      placeholder="New category"
+                      className="h-6 text-[11px] flex-1 px-1.5"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === "Enter" && newCatInlineName.trim()) createCatInlineMut.mutate({ name: newCatInlineName.trim(), sortOrder: categories.length });
+                        if (e.key === "Escape") { setNewCatInline(false); setNewCatInlineName(""); }
+                      }}
+                    />
+                    <Button size="sm" variant="ghost" className="h-6 text-[10px] px-1.5" disabled={!newCatInlineName.trim() || createCatInlineMut.isPending}
+                      onClick={() => createCatInlineMut.mutate({ name: newCatInlineName.trim(), sortOrder: categories.length })}>
+                      Save
+                    </Button>
+                  </div>
+                ) : (
+                  <button className="w-full text-left px-3 py-1.5 text-xs text-[hsl(183,70%,50%)] hover:bg-secondary rounded transition-colors" onClick={() => setNewCatInline(true)}>
+                    + New category
+                  </button>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+          <div className="flex items-center gap-2 mt-1">
+            <Badge variant="outline">v{formula.version || 1}</Badge>
+            <Badge variant={formula.status === "final" ? "default" : "secondary"}>{formula.status}</Badge>
+            <Select
+              value={formula.formulaRole || "accord"}
+              onValueChange={(v) => updateFormulaRoleMut.mutate(v)}
+            >
+              <SelectTrigger
+                className={`h-6 w-auto text-[10px] px-2 py-0 gap-1 ${
+                  (formula.formulaRole || "accord") === "final"
+                    ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300"
+                    : "border-border bg-secondary text-muted-foreground"
+                }`}
+                data-testid="select-formula-role"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="accord">Accord</SelectItem>
+                <SelectItem value="final">Final Formula</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowCreateBatch(true)}
+            disabled={ingredients.length === 0}
+            data-testid="button-create-production-batch"
+          >
+            <FlaskConical size={14} className="mr-1" /> Create Production Batch
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setShowScale(true)} data-testid="button-scale">
+            <Scale size={14} className="mr-1" /> Scale
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setShowDupDialog(true)} data-testid="button-duplicate">
+            <Copy size={14} className="mr-1" /> Duplicate
+          </Button>
+        </div>
+      </div>
+
+      {warnings.length > 0 && (
+        <div className="mb-4 space-y-1">
+          {warnings.map((w, i) => (
+            <div key={i} className="flex items-center gap-2 text-xs text-orange-400 bg-orange-900/20 rounded px-3 py-1.5">
+              <AlertTriangle size={12} /> {w}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* TODO(neat-view): wire a non-destructive "Neat view / Create 100% neat
+          version" action here using computeNeatComposition() from @/lib/api.
+          It returns per-row neat grams + renormalised %, and flags rows whose
+          material is a commercial dilution (isCommercialDilution) so those are
+          surfaced for the user to decide rather than silently overwritten.
+          Deferred from this pass to avoid touching the fragile dialog wiring in
+          this file; the computation is implemented and unit-tested. */}
+      {/* Concentration panel — live formulation calculator */}
+      {(() => {
+        const targetNum = parseFloat(asString(targetConcInput) || asString(formula.intendedConcentrationPercent) || "0");
+        const hasTarget = !!targetNum && !isNaN(targetNum) && targetNum > 0;
+        const hasAromatic = massSplit.aromaticNeat > 0;
+        // Total solvent = carrier hidden in dilutions + explicit solvent rows.
+        const totalSolvent = formulaSolventGrams(massSplit);
+        const hasAnyMass = totalWeighed > 0;
+
+        const alignmentTolerance = Math.max(0.5, totalWeighed * 0.01);
+
+        let neededDisplay: any = "—";
+        let chip: any = null;
+        // At a 100% target there is, by definition, no solvent budget at all —
+        // requiredSolvent is always 0. Any carrier that shows up here comes
+        // from commercially pre-diluted raw materials (e.g. Benzoin Resinoid
+        // 50% DPG, Furaneol 15% TEC) that simply aren't sold neat. That carrier
+        // is physically unavoidable, so it isn't something to "fix" — treat it
+        // as neutral information rather than an alarming excess/warning.
+        const isFullConcentrateTarget = hasTarget && Math.abs(targetNum - 100) < 0.01;
+        if (hasTarget && hasAromatic) {
+          const requiredTotal = massSplit.aromaticNeat / (targetNum / 100);
+          const requiredSolvent = requiredTotal - massSplit.aromaticNeat;
+          const needed = requiredSolvent - totalSolvent;
+          const isCarrierFromRawMaterials = isFullConcentrateTarget && needed < -alignmentTolerance;
+          if (Math.abs(needed) <= alignmentTolerance) {
+            neededDisplay = <span className="text-emerald-400">✓ on target</span>;
+          } else if (needed > 0) {
+            neededDisplay = <span className="text-amber-400">+{fmtGrams(needed)}</span>;
+          } else if (isCarrierFromRawMaterials) {
+            neededDisplay = <span className="text-muted-foreground">{fmtGrams(Math.abs(needed))} carrier (in materials)</span>;
+          } else {
+            neededDisplay = <span className="text-orange-400">−{fmtGrams(Math.abs(needed))} excess</span>;
+          }
+          if (Math.abs(needed) <= alignmentTolerance) {
+            chip = (
+              <Badge variant="outline" className="border-emerald-700 bg-emerald-900/30 text-emerald-300">
+                Aligned
+              </Badge>
+            );
+          } else if (needed > alignmentTolerance) {
+            chip = (
+              <Badge variant="outline" className="border-amber-700 bg-amber-900/30 text-amber-300">
+                Needs {fmtGrams(needed)} solvent
+              </Badge>
+            );
+          } else if (isCarrierFromRawMaterials) {
+            chip = (
+              <Badge variant="outline" className="border-border bg-secondary/50 text-muted-foreground">
+                Includes {fmtGrams(Math.abs(needed))} carrier solvent from pre-diluted materials
+              </Badge>
+            );
+          } else if (needed < -alignmentTolerance) {
+            chip = (
+              <Badge variant="outline" className="border-orange-700 bg-orange-900/30 text-orange-300">
+                Above target by {fmtGrams(Math.abs(needed))}
+              </Badge>
+            );
+          }
+        }
+
+        return (
+          <div className="mb-4 rounded-md border border-border bg-secondary/30 p-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Target</div>
+                <div className="relative">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={targetConcInput}
+                    onChange={(e) => setTargetConcInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        flushTargetSave();
+                      }
+                    }}
+                    placeholder="e.g. 20"
+                    aria-invalid={!targetIsValid}
+                    className="h-8 pr-6 text-sm font-mono"
+                    data-testid="input-target-concentration"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                </div>
+                {!targetIsValid && (
+                  <p className="text-xs text-destructive mt-1">Enter a value between 1 and 100</p>
+                )}
+                {targetIsValid && saveStatus === "pending" && (
+                  <span className="text-xs text-muted-foreground mt-1 inline-block">Saving…</span>
+                )}
+                {targetIsValid && saveStatus === "saved" && (
+                  <span className="text-xs text-emerald-500 mt-1 inline-block">Saved</span>
+                )}
+                {saveStatus === "error" && (
+                  <span className="text-xs text-destructive mt-1 inline-block">Save failed</span>
+                )}
+              </div>
+              <div>
+                <div
+                  className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1"
+                  title="Calculated from current formula contents — not stored in the database"
+                >
+                  Actual (live)
+                </div>
+                <div className="h-8 flex items-center font-mono text-sm" data-testid="text-actual-concentration">
+                  {hasAnyMass ? fmtPercent(concentratePct) : "—"}
+                </div>
+              </div>
+              <div>
+                <div
+                  className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1"
+                  title="Calculated from target and current masses — not stored"
+                >
+                  Required solvent
+                </div>
+                <div className="h-8 flex items-center font-mono text-sm" data-testid="text-required-solvent">
+                  {neededDisplay}
+                </div>
+              </div>
+            </div>
+            {(chip || hasAnyMass) && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                {chip && <div>{chip}</div>}
+                {hasAnyMass && (
+                  <>
+                    <span>Weighed total: <span className="font-mono text-foreground">{fmtGrams(totalWeighed)}</span></span>
+                    <span>Aromatic (neat): <span className="font-mono text-foreground">{fmtGrams(massSplit.aromaticNeat)}</span></span>
+                    <span>Solvent in dilutions: <span className="font-mono text-foreground">{fmtGrams(totalSolvent)}</span></span>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Ingredient table */}
+      <IngredientTable
+        formulaId={formula.id}
+        enriched={enriched}
+        ingredients={ingredients}
+        materials={materials}
+        materialSources={materialSources}
+        dilutions={dilutions}
+        allFormulas={allFormulas}
+        totalWeighed={totalWeighed}
+        totalNeat={totalNeat}
+        totalPercent={totalPercent}
+        onAddClick={() => setShowAddIngredient(true)}         onMaterialClick={onMaterialClick}
+      />
+
+      {/* Pyramid */}
+      <div className="mb-6">
+        <div className="bg-card rounded-lg border border-border p-4">
+          <h3 className="text-xs font-semibold text-muted-foreground mb-3">Fragrance Pyramid</h3>
+          {Object.entries(pyramid).map(([role, pct]) => (
+            <div key={role} className="flex items-center gap-2 mb-1.5">
+              <span className="text-xs w-14 capitalize text-muted-foreground">{role}</span>
+              <div className="flex-1 bg-secondary rounded-full h-2 overflow-hidden">
+                <div className="h-full bg-[hsl(183,70%,36%)] rounded-full transition-all" style={{ width: `${pct}%` }} />
+              </div>
+              <span className="text-xs w-8 text-right font-mono">{pct}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+          {/* Exchange Solvent */}
+    {exchangeSolvent.length > 0 && (
+      <div className="mb-6">
+        <div className="bg-card rounded-lg border border-border p-4">
+          <h3 className="text-xs font-semibold text-muted-foreground mb-3">Exchange Solvent</h3>
+          <p className="text-[10px] text-muted-foreground mb-3">Solvent already contributed by dilutions of other ingredients. "You need to add" = your weighed amount minus what dilutions already bring.</p>
+          {exchangeSolvent.map((es: any) => (
+            <div key={es.solventMaterialId} className="mb-3 last:mb-0">
+              <div className="text-sm font-medium mb-1.5">{es.solventName}</div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <span className="text-muted-foreground">Weighed: </span>
+                  <span className="font-mono">{fmtGrams(es.weighedGrams)}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">From dilutions: </span>
+                  <span className="font-mono text-[hsl(183,70%,50%)]">{fmtGrams(es.contributedBySolvent)}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">You need to add: </span>
+                  <span className="font-mono font-semibold">{fmtGrams(es.adjustedGrams)}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+      {/* Notes (editable) */}
+      <div className="bg-card rounded-lg border border-border p-4 mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-semibold text-muted-foreground">Notes</h3>
+          {!editingNotes && (
+            <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setEditingNotes(true)}>
+              <Pencil size={11} className="mr-1" /> Edit
+            </Button>
+          )}
+        </div>
+        {editingNotes ? (
+          <div className="space-y-2">
+            <Textarea
+              value={notesText}
+              onChange={e => setNotesText(e.target.value)}
+              placeholder="Working notes, observations, ideas..."
+              rows={5}
+              className="text-sm"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <Button size="sm" disabled={saveNotesMut.isPending} onClick={() => saveNotesMut.mutate(notesText)}>
+                {saveNotesMut.isPending ? "Saving..." : "Save"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => { setNotesText(formula.formulaNotes || ""); setEditingNotes(false); }}>Cancel</Button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm whitespace-pre-wrap">
+            {formula.formulaNotes || <span className="text-muted-foreground">No notes yet. Click Edit to add working notes.</span>}
+          </p>
+        )}
+      </div>
+
+      {/* Dialogs */}
+      <ScaleDialog open={showScale} onOpenChange={setShowScale} formula={formula} ingredients={ingredients} materials={materials} dilutions={dilutions} allFormulas={allFormulas} />
+      <DuplicateDialog
+        open={showDupDialog}
+        onOpenChange={setShowDupDialog}
+        formula={formula}
+        isPending={dupMutation.isPending}
+        onDuplicate={(name: string) => dupMutation.mutate({ id: formula.id, name })}
+      />
+      <AddIngredientDialog open={showAddIngredient} onOpenChange={setShowAddIngredient} formulaId={formula.id} materials={materials} allFormulas={allFormulas.filter((f: any) => f.id !== formula.id)} />
+      <CreateProductionBatchDialog
+        open={showCreateBatch}
+        onOpenChange={setShowCreateBatch}
+        formula={formula}
+        ingredients={ingredients}
+        materials={materials}
+        materialSources={materialSources}
+        productionBatches={productionBatches}
+        allFormulas={allFormulas}
+        formulaInventoryMovements={formulaInventoryMovements}
+      />
+    </div>
+  );
+}
+
+// ─── Ingredient Table (main working surface) ────────────────────
+function IngredientTable({ formulaId, enriched, ingredients, materials, materialSources, dilutions, allFormulas, totalWeighed, totalNeat, totalPercent, onAddClick, onMaterialClick }: any) {
+  const { toast } = useToast();
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; ing: any } | null>(null);
+  const [changeMatDialog, setChangeMatDialog] = useState(null);
+  const [editingGrams, setEditingGrams] = useState<string | null>(null);
+  const [gramsValue, setGramsValue] = useState("");
+  const [changingDilution, setChangingDilution] = useState<string | null>(null);
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handler = () => setContextMenu(null);
+    if (contextMenu) window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  }, [contextMenu]);
+
+  const updateIngMut = useMutation({
+    mutationFn: ({ id, data }: any) => patchJson(`/api/formula-ingredients/${id}`, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/formulas", formulaId, "ingredients"] }); },
+  });
+
+  const deleteIngMut = useMutation({
+    mutationFn: (id: string) => deleteJson(`/api/formula-ingredients/${id}`),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/formulas", formulaId, "ingredients"] }); },
+  });
+
+  function getIngredientName(ing: any) {
+    if (ing.materialId) return materials.find((m: any) => m.id === ing.materialId)?.name || "Unknown";
+    if (ing.sourceFormulaId) return allFormulas.find((f: any) => f.id === ing.sourceFormulaId)?.name || "Formula";
+    if (ing.dilutionId) return dilutions.find((d: any) => d.id === ing.dilutionId)?.name || "Dilution";
+    return "Unknown";
+  }
+
+  function getMaterialDilutions(ing: any) {
+      // Pro raw materiály vrátit material-specific diluce
+  if (ing.materialId) {
+    return dilutions.filter((d: any) => d.sourceMaterialId === ing.materialId);
+  }
+  // Pro formuly/accordy vrátit generické diluce (bez sourceMaterialId)
+  if (ing.sourceFormulaId || ing.sourceType === "formula") {
+    return dilutions.filter((d: any) => !d.sourceMaterialId);
+  }
+  return [];
+    }
+
+  function getIngredientDilutionLabel(ing: any) {
+    if (ing.dilutionId) {
+      const dil = dilutions.find((d: any) => d.id === ing.dilutionId);
+      return dil ? `${fmtNum(dil.dilutionPercent)}%` : "?";
+    }
+      // Default je 100% (NEAT) pro materiály i formuly/accordy
+  return "100%";
+    }
+
+  // ─── Stock status (Sklad) column ───────────────────────────────
+  // Suma skladové zásoby materiálu přes všechny zdroje/dodavatele.
+  function getMaterialStock(materialId: string): number {
+    return (materialSources || [])
+      .filter((s: any) => s.materialId === materialId)
+      .reduce((sum: number, s: any) => sum + (parseFloat(s.stockGrams || "0") || 0), 0);
+  }
+
+  // Stav skladu pro danou ingredienci vzhledem k aktuální velikosti formule.
+  // Sklad materiálů se vede jako čistá (neat) aromatická látka, takže se
+  // porovnává proti stockDeductionGrams (= neatGramsOf), stejně jako u
+  // Create Production Batch.
+  function getStockStatus(ing: any): { stock: number | null; needed: number; status: "none" | "insufficient" | "low" | "ok" } | null {
+    if (!ing.materialId) return null; // accordy/sub-formulace nejsou vedeny ve skladu materiálů
+    const stock = getMaterialStock(ing.materialId);
+    const needed = stockDeductionGrams(ing);
+    if (needed <= 0) return { stock, needed, status: "ok" };
+    let status: "insufficient" | "low" | "ok";
+    if (stock < needed) status = "insufficient";
+    else if (stock < needed * 1.15) status = "low";
+    else status = "ok";
+    return { stock, needed, status };
+  }
+
+  function handleGramsSave(ingId: string) {
+    const g = parseEuroInput(gramsValue);
+    if (isNaN(g) || g < 0) return;
+    const ing = ingredients.find((i: any) => i.id === ingId);
+    const neatMult = neatMultiplierFor(ing, dilutions);
+    updateIngMut.mutate({
+      id: ingId,
+      data: { gramsAsWeighed: String(g), neatGrams: String(g * neatMult) }
+    });
+    setEditingGrams(null);
+  }
+
+  function handleDilutionChange(ingId: string, dilutionId: string | null) {
+    const ing = ingredients.find((i: any) => i.id === ingId);
+    if (!ing) return;
+    const g = weighedGramsOf(ing);
+    const neatMult = neatMultiplierFor({ dilutionId }, dilutions);
+    const sourceType = dilutionId
+      ? (ing.sourceFormulaId ? "formula" : "material")
+      : "material";
+    updateIngMut.mutate({
+      id: ingId,
+      data: {
+        dilutionId: dilutionId || null,
+        neatGrams: String(g * neatMult),
+        sourceType,
+      }
+    });
+    setChangingDilution(null);
+  }
+
+  function handleHighlight(ingId: string, type: string) {
+    updateIngMut.mutate({ id: ingId, data: { highlightType: type } });
+    setContextMenu(null);
+  }
+
+  function handleRemoveAllHighlights() {
+    for (const ing of ingredients) {
+      if (ing.highlightType && ing.highlightType !== "none") {
+        updateIngMut.mutate({ id: ing.id, data: { highlightType: "none" } });
+      }
+    }
+    setContextMenu(null);
+  }
+
+  return (
+    <div className="bg-card rounded-lg border border-border overflow-hidden mb-6 relative">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border text-xs text-muted-foreground">
+            <th className="text-left p-2 pl-3">Ingredient</th>
+            <th className="text-center p-2" style={{ width: 90 }}>Dilution</th>
+            <th className="text-right p-2" style={{ width: 90 }}>Weighed</th>
+            <th className="text-right p-2" style={{ width: 80 }}>Neat</th>
+            <th className="text-right p-2" style={{ width: 75 }}>%</th>
+            <th className="text-right p-2 pr-3" style={{ width: 95 }}>Sklad</th>
+          </tr>
+        </thead>
+        <tbody>
+          {enriched.map((ing: any) => {
+            const hlClass = ing.highlightType === "too_strong" ? "highlight-too-strong" :
+              ing.highlightType === "too_weak" ? "highlight-too-weak" :
+              ing.highlightType === "alternative" ? "highlight-alternative" : "";
+            const matDilutions = getMaterialDilutions(ing);
+
+            const isSolv = isSolventIngredient(ing, materials);
+            return (
+              <tr key={ing.id} className={`border-b border-border/50 hover:bg-secondary/30 ${hlClass} ${isSolv ? 'bg-[hsl(200,50%,15%)]/30' : ''}`}>
+                <td className="p-2 pl-3">
+                  <span
+                    className={`${ing.materialId ? 'cursor-pointer hover:underline' : ''} ${ing.dilutionId ? "text-[hsl(183,70%,50%)]" : ""} ${isSolv ? 'italic text-[hsl(200,80%,65%)]' : ''}`}
+                    onClick={() => { if (ing.materialId) onMaterialClick?.(ing.materialId); }}
+                    onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, ing }); }}
+                  >
+                    {getIngredientName(ing)}
+                  </span>
+                  {ing.sourceType === "formula" && <Badge variant="outline" className="ml-1 text-[9px]">accord</Badge>}
+                  {isSolv && <Badge variant="outline" className="ml-1 text-[9px] border-[hsl(200,80%,65%)] text-[hsl(200,80%,65%)]">solvent</Badge>}
+                </td>
+
+                {/* Dilution cell — clickable to change */}
+                <td className="text-center p-2">
+                  {changingDilution === ing.id && (ing.materialId || ing.sourceFormulaId) ? (
+                    <select
+                      className="bg-secondary text-xs rounded px-1 py-0.5 border border-border text-foreground w-full"
+                      autoFocus
+                      value={ing.dilutionId || "__pure__"}
+                      onChange={(e) => handleDilutionChange(ing.id, e.target.value === "__pure__" ? null : e.target.value)}
+                      onBlur={() => setChangingDilution(null)}
+                    >
+                      <option value="__pure__">100% (pure)</option>
+                      {matDilutions.map((d: any) => (
+                        <option key={d.id} value={d.id}>{fmtNum(d.dilutionPercent)}%{d.solventName ? ` in ${d.solventName}` : ''}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span
+className={ (matDilutions.length > 0 || ing.sourceFormulaId) ? 'cursor-pointer hover:text-foreground underline decoration-dotted' : ''}
+                      onClick={() =>  (matDilutions.length > 0 || ing.sourceFormulaId) && setChangingDilution(ing.id)}
+                    >
+                      {getIngredientDilutionLabel(ing)}
+                    
+                                  </span>
+)}
+                </td>
+
+                {/* Weighed grams — click to edit inline */}
+                <td className="text-right p-2">
+                  {editingGrams === ing.id ? (
+                    <input
+                      className="bg-secondary text-xs rounded px-1 py-0.5 border border-border text-right font-mono w-20 text-foreground"
+                      type="text"
+                      inputMode="decimal"
+                      autoFocus
+                      ref={el => { if (el && !el.dataset.selected) { el.dataset.selected = "1"; el.select(); } }}
+                      value={gramsValue}
+                                    onChange={e => setGramsValue(e.target.value)}              
+                      onBlur={() => handleGramsSave(ing.id)}
+                      onKeyDown={e => { if (e.key === "Enter") handleGramsSave(ing.id); if (e.key === "Escape") setEditingGrams(null); }}
+                    />
+                  ) : (
+                    <span
+                      className="font-mono text-xs cursor-pointer hover:text-[hsl(183,70%,50%)] hover:underline decoration-dotted"
+                      onClick={() => { setEditingGrams(ing.id); setGramsValue(weighedGramsOf(ing).toFixed(3).replace(".", ",")); }}
+                    >
+                      {fmtGrams(weighedGramsOf(ing))}
+                    </span>
+                  )}
+                </td>
+
+                <td className="text-right p-2 font-mono text-xs">{fmtGrams(neatGramsOf(ing))}</td>
+                <td className="text-right p-2 font-mono text-xs">{fmtPercent(ing.percentInFormula)}</td>
+
+                {/* Sklad — barevný stav zásoby vůči potřebě aktuální šarže */}
+                <td className="text-right p-2 pr-3">
+                  {(() => {
+                    const info = getStockStatus(ing);
+                    if (!info) return <span className="text-muted-foreground text-xs">—</span>;
+                    const colorClass =
+                      info.status === "insufficient" ? "text-red-500" :
+                      info.status === "low" ? "text-amber-500" :
+                      "text-emerald-500";
+                    const dotClass =
+                      info.status === "insufficient" ? "bg-red-500" :
+                      info.status === "low" ? "bg-amber-500" :
+                      "bg-emerald-500";
+                    return (
+                      <span
+                        className={`inline-flex items-center gap-1 justify-end font-mono text-xs ${colorClass}`}
+                        title={`Potřeba (neat): ${info.needed.toFixed(3)} g · Skladem: ${(info.stock ?? 0).toFixed(3)} g`}
+                      >
+                        <span className={`inline-block w-1.5 h-1.5 rounded-full ${dotClass}`} />
+                        {fmtGrams(info.stock ?? 0)}
+                      </span>
+                    );
+                  })()}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="text-[hsl(183,70%,50%)] font-medium">
+            <td className="p-2 pl-3">Total</td>
+            <td></td>
+            <td className="text-right p-2 font-mono text-xs">{fmtGrams(totalWeighed)}</td>
+            <td className="text-right p-2 font-mono text-xs">{fmtGrams(totalNeat)}</td>
+            <td className="text-right p-2 font-mono text-xs">{fmtPercent(totalPercent)}</td>
+            <td className="pr-3"></td>
+          </tr>
+        </tfoot>
+      </table>
+      <div className="border-t border-border p-2 pl-3">
+        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={onAddClick} data-testid="button-add-ingredient">
+          + Add ingredient
+        </button>
+      </div>
+
+      {/* Context Menu */}
+      {changeMatDialog && (
+        <ChangeRawMaterialDialog
+          ing={changeMatDialog}
+          materials={materials}
+          allFormulas={allFormulas}
+          formulaId={formulaId}
+          onClose={() => setChangeMatDialog(null)}
+        />
+      )}
+
+      {contextMenu && (
+        <div
+          className="fixed bg-popover border border-border rounded-lg shadow-lg py-1 z-50 min-w-[200px]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={e => e.stopPropagation()}
+        >
+          <ContextMenuItem label="Change dilution" onClick={() => { setChangingDilution(contextMenu.ing.id); setContextMenu(null); }} disabled={!contextMenu.ing.materialId && !contextMenu.ing.sourceFormulaId} />
+              <ContextMenuItem label="Change raw material" onClick={() => { setChangeMatDialog(contextMenu.ing); setContextMenu(null); }} />
+          <div className="h-px bg-border my-1" />
+          <ContextMenuItem label="Highlight as too strong" onClick={() => handleHighlight(contextMenu.ing.id, "too_strong")} />
+          <ContextMenuItem label="Highlight as too weak" onClick={() => handleHighlight(contextMenu.ing.id, "too_weak")} />
+          <ContextMenuItem label="Highlight (alternative)" onClick={() => handleHighlight(contextMenu.ing.id, "alternative")} />
+          <ContextMenuItem label="Remove highlight" onClick={() => handleHighlight(contextMenu.ing.id, "none")} />
+          <ContextMenuItem label="Remove all highlights" onClick={handleRemoveAllHighlights} />
+          <div className="h-px bg-border my-1" />
+          <ContextMenuItem label="Delete formula entry" onClick={() => { deleteIngMut.mutate(contextMenu.ing.id); setContextMenu(null); }} destructive />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContextMenuItem({ label, onClick, disabled, destructive }: { label: string; onClick: () => void; disabled?: boolean; destructive?: boolean }) {
+  return (
+    <button
+      className={`block w-full text-left px-3 py-1.5 text-xs transition-colors
+        ${disabled ? 'text-muted-foreground/50 cursor-not-allowed' : destructive ? 'text-destructive hover:bg-destructive/10' : 'text-foreground hover:bg-secondary'}`}
+      onClick={disabled ? undefined : onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ─── Add Ingredient Dialog (simplified: material or formula) ────
+
+function ChangeRawMaterialDialog({ ing, materials, allFormulas, formulaId, onClose }) {
+  const [sourceType, setSourceType] = useState(ing.sourceType || "material");
+  const [sourceId, setSourceId] = useState("");
+  const [search, setSearch] = useState("");
+  const mutation = useMutation({
+    mutationFn: ({ id, data }) => patchJson(`/api/formula-ingredients/${id}`, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/formulas", formulaId, "ingredients"] }); onClose(); },
+  });
+  function handleSave() {
+    if (!sourceId) return;
+    mutation.mutate({ id: ing.id, data: { sourceType, materialId: sourceType === "material" ? sourceId : null, sourceFormulaId: sourceType === "formula" ? sourceId : null, dilutionId: null } });
+  }
+    const { data: families = [] } = useQuery({ queryKey: ["/api/olfactive-families"] });
+  const options = sourceType === "material" ? materials : allFormulas;
+    const grouped = useMemo(() => {
+    const q = search.toLowerCase();
+    const list = options.filter((o: any) => o.name.toLowerCase().includes(q));
+    if (sourceType !== "material") return [{ label: "Formulas", items: list }];
+    const byFamily: Record<string, any[]> = {};
+    for (const mat of list) {
+      const fam = families.find((f: any) => f.id === mat.familyId);
+      const label = fam?.name || "Other";
+      if (!byFamily[label]) byFamily[label] = [];
+      byFamily[label].push(mat);
+    }
+    return Object.entries(byFamily).sort(([a], [b]) => a.localeCompare(b)).map(([label, items]) => ({ label, items }));
+  }, [options, families, search, sourceType]);
+  return (
+    <Dialog open={true} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="bg-card border-border">
+        <DialogHeader><DialogTitle>Change Raw Material</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <Select value={sourceType} onValueChange={v => { setSourceType(v); setSourceId(""); setSearch(""); }}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="material">Raw Material</SelectItem>
+              <SelectItem value="formula">Formula / Accord</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="h-7 text-xs" autoFocus />
+          <div className="max-h-52 overflow-y-auto border border-border rounded">
+                          {grouped.length === 0 && <p className="text-xs text-muted-foreground px-3 py-2">No results</p>}
+              {grouped.map(({ label, items }) => (
+                <div key={label}>
+                  <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide bg-secondary/50 sticky top-0">{label}</div>
+                  {items.map((o: any) => (
+                    <button key={o.id} className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-secondary transition-colors ${sourceId === o.id ? "bg-secondary font-medium" : "text-foreground"}`} onClick={() => setSourceId(o.id)}>{o.name}</button>
+                  ))}
+                </div>
+              ))}
+          </div>
+          <Button className="w-full" disabled={!sourceId || mutation.isPending} onClick={handleSave}>
+            {mutation.isPending ? "Saving..." : "Change material"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AddIngredientDialog({ open, onOpenChange, formulaId, materials, allFormulas }: any) {
+  const { toast } = useToast();
+  const [sourceType, setSourceType] = useState("material");
+  const [sourceId, setSourceId] = useState("");   const [search, setSearch] = useState("");    const mutation = useMutation({
+    mutationFn: (data: any) => postJson("/api/formula-ingredients", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas", formulaId, "ingredients"] });
+      onOpenChange(false);
+      setSourceId("");
+      toast({ title: "Ingredient added" });
+    },
+  });
+
+  const options = sourceType === "material" ? materials : allFormulas;
+    const { data: families = [] } = useQuery({ queryKey: ["/api/olfactive-families"] });
+    const grouped = useMemo(() => {
+    const q = search.toLowerCase();
+    const list = options.filter((o: any) => o.name.toLowerCase().includes(q));
+    if (sourceType !== "material") return [{ label: "Formulas", items: list }];
+    const byFamily: Record<string, any[]> = {};
+    for (const mat of list) {
+      const fam = families.find((f: any) => f.id === mat.familyId);
+      const label = fam?.name || "Other";
+      if (!byFamily[label]) byFamily[label] = [];
+      byFamily[label].push(mat);
+    }
+    return Object.entries(byFamily).sort(([a], [b]) => a.localeCompare(b)).map(([label, items]) => ({ label, items }));
+    }, [options, families, search, sourceType]);
+    function handleAdd() {
+    mutation.mutate({
+      formulaId,
+      sourceType,
+      materialId: sourceType === "material" ? sourceId : null,
+      dilutionId: null,
+      sourceFormulaId: sourceType === "formula" ? sourceId : null,
+      gramsAsWeighed: "0",
+      neatGrams: "0",
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-border">
+        <DialogHeader><DialogTitle>Add Ingredient</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <Select value={sourceType} onValueChange={v => { setSourceType(v); setSourceId(""); }}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="material">Raw Material</SelectItem>
+              <SelectItem value="formula">Formula / Accord</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="h-7 text-xs" /><div className="max-h-52 overflow-y-auto border border-border rounded">
+              {grouped.length === 0 && <p className="text-xs text-muted-foreground px-3 py-2">No results</p>}
+              {grouped.map(({ label, items }) => (
+                <div key={label}>
+                  <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide bg-secondary/50 sticky top-0">{label}</div>
+                  {items.map((o: any) => (
+                    <button key={o.id} className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-secondary transition-colors ${sourceId === o.id ? "bg-secondary font-medium" : "text-foreground"}`} onClick={() => setSourceId(o.id)}>{o.name}</button>
+                  ))}
+                </div>
+              ))}
+            </div>        
+          <p className="text-[10px] text-muted-foreground">Dilution and grams can be set in the formula table after adding.</p>
+          <Button className="w-full" disabled={!sourceId || mutation.isPending} onClick={handleAdd} data-testid="button-add-ingredient-confirm">
+            Add
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Create Formula Dialog (no productType, with inline category creation) ──
+function CreateFormulaDialog({ open, onOpenChange, categories, onCreated }: any) {
+  const { toast } = useToast();
+  const [name, setName] = useState("");
+  const [commercialName, setCommercialName] = useState("");
+  const [catId, setCatId] = useState("");
+  const [showNewCat, setShowNewCat] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+
+  const mutation = useMutation({
+    mutationFn: (data: any) => postJson("/api/formulas", data),
+    onSuccess: (newFormula: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+      onOpenChange(false);
+      setName(""); setCommercialName(""); setCatId("");
+      toast({ title: "Formula created" });     onCreated?.(newFormula.id);
+    },
+  });
+
+  const createCatMut = useMutation({
+    mutationFn: (data: any) => postJson("/api/formula-categories", data),
+    onSuccess: (newCat: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formula-categories"] });
+      setCatId(newCat.id);
+      setShowNewCat(false);
+      setNewCatName("");
+      toast({ title: "Category created" });
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-border">
+        <DialogHeader><DialogTitle>New Formula</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <Input placeholder="Commercial name (optional)" value={commercialName} onChange={e => setCommercialName(e.target.value)} data-testid="input-formula-commercial-name" />
+          <Input placeholder="Name" value={name} onChange={e => setName(e.target.value)} data-testid="input-formula-name" />
+
+          {!showNewCat ? (
+            <div className="space-y-1">
+              <Select value={catId} onValueChange={setCatId}>
+                <SelectTrigger><SelectValue placeholder="Category (optional)" /></SelectTrigger>
+                <SelectContent>
+                  {categories.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <button className="text-[10px] text-[hsl(183,70%,50%)] hover:underline" onClick={() => setShowNewCat(true)}>
+                + Create new category
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-2 items-end">
+              <Input placeholder="New category name" value={newCatName} onChange={e => setNewCatName(e.target.value)} className="h-8 text-xs flex-1" autoFocus />
+              <Button size="sm" disabled={!newCatName || createCatMut.isPending} onClick={() => createCatMut.mutate({ name: newCatName, sortOrder: categories.length })}>
+                Create
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setShowNewCat(false)}>Cancel</Button>
+            </div>
+          )}
+
+          <Button className="w-full" disabled={!name || mutation.isPending}
+            onClick={() => mutation.mutate({ name, commercialName: commercialName.trim() || null, categoryId: catId || null, productType: null })}
+            data-testid="button-create-formula"
+          >
+            Create
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Scale Dialog (all 4 methods in one panel) ─────────────────
+function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilutions, allFormulas }: any) {
+  const { toast } = useToast();
+  const [totalWeightVal, setTotalWeightVal] = useState("");
+  const [factorVal, setFactorVal] = useState("");
+  const [absPercentVal, setAbsPercentVal] = useState("");
+  const [percentFactorVal, setPercentFactorVal] = useState("");
+
+  // Reset when dialog opens
+  useEffect(() => {
+    if (open) { setTotalWeightVal(""); setFactorVal(""); setAbsPercentVal(""); setPercentFactorVal(""); }
+  }, [open]);
+
+  const currentTotal = ingredients.reduce((s: number, i: any) => s + weighedGramsOf(i), 0);
+  // Derive current concentration from actual aromatic vs. solvent mass so
+  // solvent-aware scaling works even if intendedConcentrationPercent is stale.
+  const computedConcentration = calcConcentratePercent(ingredients, materials);
+  const currentConcentration = computedConcentration > 0
+    ? computedConcentration
+    : parseFloat(asString(formula.intendedConcentrationPercent) || "0");
+  const maxPercentFactor = currentConcentration > 0 ? (100 / currentConcentration) : 1;
+
+  // Determine which method is active (last typed into)
+  type ScaleMethod = "total_weight" | "factor" | "abs_percent" | "pct_factor" | null;
+  let activeMethod: ScaleMethod = null;
+  let preview: any[] = [];
+
+  // Only one method produces a preview at a time. We check in priority order of the most recently filled.
+  // Better approach: whichever field is non-empty and last changed wins.
+  // For simplicity: check each, last non-empty one wins.
+  if (totalWeightVal) { activeMethod = "total_weight"; }
+  if (factorVal) { activeMethod = "factor"; }
+  if (absPercentVal) { activeMethod = "abs_percent"; }
+  if (percentFactorVal) { activeMethod = "pct_factor"; }
+
+  if (activeMethod === "total_weight") {
+    const v = parseEuroInput(totalWeightVal);
+    if (!isNaN(v) && v > 0) preview = scaleToTotalWeight(ingredients, v);
+  } else if (activeMethod === "factor") {
+    const v = parseEuroInput(factorVal);
+    if (!isNaN(v) && v > 0) preview = scaleByFactor(ingredients, v);
+  } else if (activeMethod === "abs_percent") {
+    const v = parseEuroInput(absPercentVal);
+    if (!isNaN(v) && v > 0 && currentConcentration > 0) {
+      // Solvent-aware: keep the total batch weight, scale aromatic to the new
+      // concentrate %, and rebalance solvent to fill the rest.
+      const res = scaleToAbsolutePercent(ingredients, currentTotal, v, materials);
+      preview = res.ingredients;
+    }
+  } else if (activeMethod === "pct_factor") {
+    const v = parseEuroInput(percentFactorVal);
+    if (!isNaN(v) && v > 0 && currentConcentration > 0) {
+      const res = scalePercentByFactor(ingredients, currentConcentration, v, currentTotal, materials);
+      preview = res.ingredients;
+    }
+  }
+
+  function clearOthers(except: ScaleMethod) {
+    if (except !== "total_weight") setTotalWeightVal("");
+    if (except !== "factor") setFactorVal("");
+    if (except !== "abs_percent") setAbsPercentVal("");
+    if (except !== "pct_factor") setPercentFactorVal("");
+  }
+
+  function getIngredientName(ing: any) {
+    if (ing.materialId) return materials?.find((m: any) => m.id === ing.materialId)?.name || "Unknown";
+    if (ing.sourceFormulaId) return allFormulas?.find((f: any) => f.id === ing.sourceFormulaId)?.name || "Formula";
+    if (ing.dilutionId) return dilutions?.find((d: any) => d.id === ing.dilutionId)?.name || "Dilution";
+    return "Unknown";
+  }
+
+  const applyMut = useMutation({
+    mutationFn: async (scaledIngs: any[]) => {
+      const missingId = scaledIngs.find((ing) => !ing?.id);
+      if (missingId) {
+        throw new Error("Cannot scale: one or more ingredients have no ID. Try closing the dialog and reopening it.");
+      }
+      for (const ing of scaledIngs) {
+        await patchJson(`/api/formula-ingredients/${ing.id}`, {
+          gramsAsWeighed: ing.gramsAsWeighed,
+          neatGrams: ing.neatGrams,
+        });
+      }
+      // Auto-sync the formula's stored target concentration to the new
+      // computed concentrate % so the Scale dialog's baseline and the
+      // deviation warning stay in sync after scaling.
+      const newConcentration = calcConcentratePercent(scaledIngs, materials);
+      // Also sync total_batch_grams to the new physical weight. This column
+      // is read elsewhere (e.g. as the Create Batch dialog's suggested
+      // produced-grams value) and going stale here is what caused batches
+      // to be deducted at the wrong scale factor — see baseFormulaGrams
+      // comment in the Create Batch dialog.
+      const newTotalWeighed = scaledIngs.reduce(
+        (s: number, i: any) => s + (parseFloat(String(i.gramsAsWeighed ?? "0")) || 0),
+        0,
+      );
+      const patchBody: any = {};
+      if (Number.isFinite(newConcentration) && newConcentration > 0) {
+        patchBody.intendedConcentrationPercent = newConcentration.toFixed(2);
+      }
+      if (newTotalWeighed > 0) {
+        patchBody.totalBatchGrams = newTotalWeighed.toFixed(3);
+      }
+      if (Object.keys(patchBody).length > 0) {
+        await patchJson(`/api/formulas/${formula.id}`, patchBody);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas", formula.id, "ingredients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+      onOpenChange(false);
+      toast({ title: "Scaling applied" });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to apply scaling",
+        description: err?.message || "Unknown error",
+        variant: "destructive",
+      });
+    },
+  });
+
+  function InfoTip({ text }: { text: string }) {
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Info size={14} className="text-muted-foreground cursor-help inline-block ml-1.5 shrink-0" />
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-64 text-xs">
+            {text}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-border max-w-lg max-h-[85vh] overflow-y-auto p-0">
+        <div className="sticky top-0 bg-card z-10 px-6 pt-6 pb-3 border-b border-border">
+          <DialogHeader><DialogTitle>Scale Formula</DialogTitle></DialogHeader>
+        </div>
+
+        <div className="px-6 pb-6 space-y-0">
+          {/* 1. Scale to total weight */}
+          <div className="py-4 border-b border-border/60">
+            <h3 className="text-sm font-semibold flex items-center">
+              Scale formula to total weight
+              <InfoTip text="Scales all ingredient weights proportionally to reach the target total batch weight" />
+            </h3>
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center">
+                <span className="text-xs text-muted-foreground w-36">Current weight</span>
+                <span className="text-xs font-mono">{fmtGrams(currentTotal)}</span>
+              </div>
+              <div className="flex items-center">
+                <span className="text-xs text-muted-foreground w-36">New weight</span>
+                <input
+                  type="text" inputMode="decimal"
+                  className="bg-secondary text-sm rounded px-2 py-1 border border-border font-mono w-40 text-foreground placeholder:text-muted-foreground/50"
+                  placeholder="Type to scale"
+                  value={totalWeightVal}
+                  onFocus={() => clearOthers("total_weight")}
+                  onChange={e => { clearOthers("total_weight"); setTotalWeightVal(e.target.value.replace(/[^0-9.,\-]/g, "")); }}
+                  data-testid="input-scale-total-weight"
+                />
+              </div>
+            </div>
+            {activeMethod === "total_weight" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} />}
+          </div>
+
+          {/* 2. Scale by scaling factor */}
+          <div className="py-4 border-b border-border/60">
+            <h3 className="text-sm font-semibold flex items-center">
+              Scale formula weight by scaling factor
+              <InfoTip text="Multiplies all ingredient weights by the given factor" />
+            </h3>
+            <div className="mt-3">
+              <div className="flex items-center">
+                <span className="text-xs text-muted-foreground w-36">Scaling factor</span>
+                <input
+                  type="text" inputMode="decimal"
+                  className="bg-secondary text-sm rounded px-2 py-1 border border-border font-mono w-40 text-foreground placeholder:text-muted-foreground/50"
+                  placeholder="Type to scale"
+                  value={factorVal}
+                  onFocus={() => clearOthers("factor")}
+                  onChange={e => { clearOthers("factor"); setFactorVal(e.target.value.replace(/[^0-9.,\-]/g, "")); }}
+                  data-testid="input-scale-factor"
+                />
+              </div>
+            </div>
+            {activeMethod === "factor" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} />}
+          </div>
+
+          {/* 3. Scale to absolute percentage */}
+          <div className="py-4 border-b border-border/60">
+            <h3 className="text-sm font-semibold flex items-center">
+              Scale formula to absolute percentage
+              <InfoTip text="Adjusts ingredient weights so the formula reaches the target concentration" />
+            </h3>
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center">
+                <span className="text-xs text-muted-foreground w-36">Can scale up to</span>
+                <span className="text-xs font-mono">{currentConcentration > 0 ? fmtPercent(100) : <span className="text-muted-foreground">Solvent required</span>}</span>
+              </div>
+              <div className="flex items-center">
+                <span className="text-xs text-muted-foreground w-36">Current percentage</span>
+                <span className="text-xs font-mono">{currentConcentration > 0 ? fmtPercent(currentConcentration) : <span className="text-muted-foreground">Not set</span>}</span>
+              </div>
+              <div className="flex items-center">
+                <span className="text-xs text-muted-foreground w-36">New percentage</span>
+                <input
+                  type="text" inputMode="decimal"
+                  className="bg-secondary text-sm rounded px-2 py-1 border border-border font-mono w-40 text-foreground placeholder:text-muted-foreground/50"
+                  placeholder="Type to scale"
+                  value={absPercentVal}
+                  onFocus={() => clearOthers("abs_percent")}
+                  onChange={e => { clearOthers("abs_percent"); setAbsPercentVal(e.target.value.replace(/[^0-9.,\-]/g, "")); }}
+                  disabled={currentConcentration <= 0}
+                  data-testid="input-scale-abs-percent"
+                />
+              </div>
+            </div>
+            {activeMethod === "abs_percent" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} />}
+          </div>
+
+          {/* 4. Scale percentage by scaling factor */}
+          <div className="py-4">
+            <h3 className="text-sm font-semibold flex items-center">
+              Scale formula percentage by scaling factor
+              <InfoTip text="Multiplies the current concentration by the given factor" />
+            </h3>
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center">
+                <span className="text-xs text-muted-foreground w-36">Max scaling factor</span>
+                <span className="text-xs font-mono">{currentConcentration > 0 ? `x ${fmtNum(maxPercentFactor)}` : <span className="text-muted-foreground">Not set</span>}</span>
+              </div>
+              <div className="flex items-center">
+                <span className="text-xs text-muted-foreground w-36">Scaling factor</span>
+                <input
+                  type="text" inputMode="decimal"
+                  className="bg-secondary text-sm rounded px-2 py-1 border border-border font-mono w-40 text-foreground placeholder:text-muted-foreground/50"
+                  placeholder="Type to scale"
+                  value={percentFactorVal}
+                  onFocus={() => clearOthers("pct_factor")}
+                  onChange={e => { clearOthers("pct_factor"); setPercentFactorVal(e.target.value.replace(/[^0-9.,\-]/g, "")); }}
+                  disabled={currentConcentration <= 0}
+                  data-testid="input-scale-pct-factor"
+                />
+              </div>
+            </div>
+            {activeMethod === "pct_factor" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} />}
+          </div>
+
+          {/* Note + Buttons */}
+          <div className="border-t border-border pt-4 mt-2">
+            <p className="text-[10px] text-muted-foreground mb-3">Preview only — scaling does not auto-save.</p>
+            <div className="flex gap-2">
+              <Button
+                disabled={preview.length === 0 || applyMut.isPending}
+                onClick={() => applyMut.mutate(preview)}
+                data-testid="button-apply-scaling"
+              >
+                {applyMut.isPending ? "Applying..." : "Apply scaling"}
+              </Button>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ScalePreviewTable({ preview, getIngredientName }: { preview: any[]; getIngredientName: (ing: any) => string }) {
+  return (
+    <div className="bg-secondary/50 rounded p-2 mt-3 max-h-48 overflow-y-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-muted-foreground">
+            <th className="w-6"></th>
+            <th className="text-left font-normal"></th>
+            <th className="text-right font-normal py-1">Weigh</th>
+            <th className="text-right font-normal py-1 pl-2">Neat</th>
+          </tr>
+        </thead>
+        <tbody>
+          {preview.map((p: any, i: number) => (
+            <tr key={p.id || i} className="border-b border-border/30">
+              <td className="py-1 text-muted-foreground w-6">{i + 1}</td>
+              <td className="py-1 truncate">{getIngredientName(p)}</td>
+              <td className="py-1 text-right font-mono">{fmtGrams(weighedGramsOf(p))}</td>
+              <td className="py-1 pl-2 text-right font-mono text-muted-foreground">{fmtGrams(neatGramsOf(p))}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function DuplicateDialog({ open, onOpenChange, formula, onDuplicate, isPending }: any) {
+  const suggested = formula?.name ? `${formula.name} copy` : "";
+  const [name, setName] = useState(suggested);
+
+  // Reset name each time dialog opens or the source formula changes,
+  // so user always sees the pre-filled suggestion instead of leftover state.
+  useEffect(() => {
+    if (open) setName(suggested);
+  }, [open, formula?.id, formula?.name]);
+
+  const trimmed = name.trim();
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-border">
+        <DialogHeader><DialogTitle>Duplicate Formula</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <Input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="New formula name"
+            autoFocus
+            onFocus={e => e.currentTarget.select()}
+            onKeyDown={e => {
+              if (e.key === "Enter" && trimmed && !isPending) onDuplicate(trimmed);
+            }}
+            data-testid="input-duplicate-name"
+          />
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>Cancel</Button>
+            <Button
+              onClick={() => onDuplicate(trimmed)}
+              disabled={!trimmed || isPending}
+              data-testid="button-confirm-duplicate"
+            >
+              {isPending ? "Duplicating..." : "Create"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Category Manager Dialog ────────────────────────────────────
+function CategoryManagerDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { toast } = useToast();
+  const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/formula-categories"] });
+  const [newName, setNewName] = useState("");
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+
+  const createMut = useMutation({
+    mutationFn: (data: any) => postJson("/api/formula-categories", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formula-categories"] });
+      setNewName("");
+      toast({ title: "Category created" });
+    },
+  });
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }: any) => patchJson(`/api/formula-categories/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formula-categories"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+      setEditId(null);
+      toast({ title: "Category renamed" });
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => deleteJson(`/api/formula-categories/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/formula-categories"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/formulas"] });
+      toast({ title: "Category deleted — formulas moved to Uncategorized" });
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-border max-w-sm">
+        <DialogHeader><DialogTitle>Category Manager</DialogTitle></DialogHeader>
+        <div className="space-y-1 max-h-60 overflow-y-auto">
+          {categories.length === 0 && (
+            <p className="text-xs text-muted-foreground py-2">No categories yet.</p>
+          )}
+          {categories.map((c: any) => (
+            <div key={c.id} className="flex items-center gap-1.5 group/cat">
+              {editId === c.id ? (
+                <>
+                  <Input
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    className="h-7 text-xs flex-1 px-2"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && editName.trim()) updateMut.mutate({ id: c.id, data: { name: editName.trim() } });
+                      if (e.key === "Escape") setEditId(null);
+                    }}
+                  />
+                  <Button size="sm" variant="ghost" className="h-7 text-[10px] px-1.5"
+                    disabled={!editName.trim() || updateMut.isPending}
+                    onClick={() => updateMut.mutate({ id: c.id, data: { name: editName.trim() } })}>
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-[10px] px-1" onClick={() => setEditId(null)}>✕</Button>
+                </>
+              ) : (
+                <>
+                  <span className="text-sm flex-1 truncate">{c.name}</span>
+                  <button
+                    className="opacity-0 group-hover/cat:opacity-100 transition-opacity p-1 rounded hover:bg-secondary"
+                    onClick={() => { setEditId(c.id); setEditName(c.name); }}
+                    title="Rename"
+                  >
+                    <Pencil size={11} />
+                  </button>
+                  <button
+                    className="opacity-0 group-hover/cat:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10 text-destructive"
+                    onClick={() => deleteMut.mutate(c.id)}
+                    title="Delete"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-border pt-3 flex gap-2">
+          <Input
+            placeholder="New category name"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            className="h-8 text-xs flex-1"
+            onKeyDown={e => {
+              if (e.key === "Enter" && newName.trim()) createMut.mutate({ name: newName.trim(), sortOrder: categories.length });
+            }}
+          />
+          <Button size="sm" disabled={!newName.trim() || createMut.isPending}
+            onClick={() => createMut.mutate({ name: newName.trim(), sortOrder: categories.length })}>
+            Add
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+// ─── Material Card View (opened from ingredient click) ────────
+// Read-only full material record using schema fields from shared/schema.ts.
+function MaterialCardView({ materialId, onBack }: { materialId: string; onBack: () => void }) {
+  const { data: materials = [] } = useQuery<any[]>({ queryKey: ["/api/materials"] });
+  const { data: families = [] } = useQuery<any[]>({ queryKey: ["/api/olfactive-families"] });
+  const { data: matDilutions = [] } = useQuery<any[]>({
+    queryKey: ["/api/materials", materialId, "dilutions"],
+  });
+  const { data: ifraLimits = [] } = useQuery<any[]>({
+    queryKey: ["/api/materials", materialId, "ifra-limits"],
+  });
+  const { data: sources = [] } = useQuery<any[]>({
+    queryKey: ["/api/materials", materialId, "sources"],
+  });
+  const { data: suppliers = [] } = useQuery<any[]>({ queryKey: ["/api/suppliers"] });
+
+  const mat = materials.find((m: any) => m.id === materialId);
+  if (!mat) return <div className="p-6 text-muted-foreground">Loading material...</div>;
+
+  const family = families.find((f: any) => f.id === mat.olfactiveFamilyId);
+
+  const totalStock = sources.reduce(
+    (sum: number, s: any) => sum + parseFloat(s.stockGrams || "0"),
+    0
+  );
+
+  const cheapestPPG = sources.reduce((best: number | null, s: any) => {
+    const ppg =
+      s.purchasePrice && s.purchaseQuantityGrams
+        ? parseFloat(s.purchasePrice) / parseFloat(s.purchaseQuantityGrams)
+        : s.pricePerGram
+        ? parseFloat(s.pricePerGram)
+        : null;
+    if (ppg === null || isNaN(ppg)) return best;
+    if (best === null || ppg < best) return ppg;
+    return best;
+  }, null as number | null);
+
+  const Field = ({ label, value }: { label: string; value: any }) => {
+    if (value === null || value === undefined || value === "") return null;
+    return (
+      <div className="flex gap-2 py-1.5 border-b border-border/30 last:border-0">
+        <span className="text-xs text-muted-foreground w-40 shrink-0">{label}</span>
+        <span className="text-sm text-foreground break-words">{value}</span>
+      </div>
+    );
+  };
+
+  const Section = ({
+    title,
+    children,
+  }: {
+    title: string;
+    children: React.ReactNode;
+  }) => (
+    <div className="bg-card border border-border rounded-lg p-4 mb-4">
+      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+        {title}
+      </h3>
+      {children}
+    </div>
+  );
+
+  return (
+    <div className="p-4 max-w-3xl overflow-y-auto">
+      <button
+        onClick={onBack}
+        className="flex items-center gap-1 pl-10 md:pl-0 text-sm text-muted-foreground hover:text-foreground mb-3"
+        data-testid="button-material-back"
+      >
+        <ArrowLeft size={16} /> Back to formula
+      </button>
+
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-xl font-semibold">{mat.name}</h2>
+          {(mat.botanicalName || mat.casNumber) && (
+            <p className="text-sm italic text-muted-foreground mt-0.5">
+              {mat.botanicalName
+                ? mat.botanicalName
+                : mat.casNumber
+                ? `CAS ${mat.casNumber}`
+                : ""}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {family && (
+              <Badge
+                variant="outline"
+                style={{ borderColor: family.color || undefined, color: family.color || undefined }}
+              >
+                {family.name}
+              </Badge>
+            )}
+            {mat.pyramidRole && (
+              <Badge variant="secondary" className="capitalize">
+                {mat.pyramidRole}
+              </Badge>
+            )}
+            {mat.treatAsSolvent && <Badge variant="outline">Solvent</Badge>}
+            {mat.status && <Badge variant="outline">{mat.status}</Badge>}
+          </div>
+        </div>
+      </div>
+
+      <Section title="Identification">
+        <Field label="Name" value={mat.name} />
+        <Field label="CAS number" value={mat.casNumber} />
+        <Field label="Botanical name" value={mat.botanicalName} />
+        <Field
+          label="Alt names"
+          value={Array.isArray(mat.altNames) && mat.altNames.length > 0 ? mat.altNames.join(", ") : null}
+        />
+        <Field label="Olfactive family" value={family?.name} />
+        <Field label="Pyramid role" value={mat.pyramidRole} />
+        <Field
+          label="Tags"
+          value={Array.isArray(mat.tags) && mat.tags.length > 0 ? mat.tags.join(", ") : null}
+        />
+        <Field label="Status" value={mat.status} />
+      </Section>
+
+      <Section title="Safety & Physical">
+        <Field label="Flash point" value={mat.flashPoint} />
+        <Field label="Solubility notes" value={mat.solubilityNotes} />
+        <Field label="Recommended dilutions" value={mat.recommendedDilutions} />
+        <Field
+          label="Treat as solvent"
+          value={mat.treatAsSolvent === true ? "Yes" : mat.treatAsSolvent === false ? "No" : null}
+        />
+      </Section>
+
+      <Section title="Olfactive Profile">
+        <Field label="Strength" value={mat.strength != null ? `${mat.strength}/10` : null} />
+        <Field label="Dominance" value={mat.dominance != null ? `${mat.dominance}/10` : null} />
+        <Field label="Projection" value={mat.projection != null ? `${mat.projection}/10` : null} />
+        <Field label="Sensory notes" value={mat.notesSensory} />
+      </Section>
+
+      <Section title="Behavior">
+        <Field label="In wax" value={mat.behaviorWax} />
+        <Field label="In alcohol" value={mat.behaviorAlcohol} />
+        <Field label="In nebulizer" value={mat.behaviorNebulizer} />
+        <Field label="In diffuser" value={mat.behaviorDiffuser} />
+      </Section>
+
+      {(sources.length > 0 || totalStock > 0 || cheapestPPG != null) && (
+        <Section title="Inventory & Sources">
+          <Field label="Total stock" value={totalStock > 0 ? fmtGrams(totalStock) : null} />
+          <Field
+            label="Cheapest price/g"
+            value={cheapestPPG != null ? fmtNum(cheapestPPG, 4) : null}
+          />
+          {sources.length > 0 && (
+            <div className="mt-2 space-y-1">
+              <p className="text-xs text-muted-foreground">Sources ({sources.length})</p>
+              {sources.map((s: any) => {
+                const sup = suppliers.find((sp: any) => sp.id === s.supplierId);
+                return (
+                  <div
+                    key={s.id}
+                    className="text-xs flex items-center justify-between py-1 border-b border-border/30 last:border-0"
+                  >
+                    <span>
+                      {sup?.name || "Unknown supplier"}
+                      {s.batchLot && (
+                        <span className="text-muted-foreground ml-1">· lot {s.batchLot}</span>
+                      )}
+                    </span>
+                    <span className="text-muted-foreground font-mono">
+                      {s.stockGrams ? fmtGrams(s.stockGrams) : "—"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Section>
+      )}
+
+      {matDilutions.length > 0 && (
+        <Section title={`Dilutions (${matDilutions.length})`}>
+          <div className="space-y-1">
+            {matDilutions.map((d: any) => (
+              <div
+                key={d.id}
+                className="flex justify-between items-center py-1 border-b border-border/30 last:border-0 text-xs"
+              >
+                <span className="text-foreground">
+                  {d.name || `${fmtNum(d.dilutionPercent)}%`}
+                  {d.solventName && (
+                    <span className="text-muted-foreground ml-1">in {d.solventName}</span>
+                  )}
+                </span>
+                <span className="text-muted-foreground font-mono">
+                  {fmtNum(d.dilutionPercent)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {ifraLimits.length > 0 && (
+        <Section title="IFRA Limits">
+          {ifraLimits.map((l: any) => (
+            <div
+              key={l.id}
+              className="flex justify-between py-1 border-b border-border/30 last:border-0 text-xs"
+            >
+              <span>
+                {l.productType}
+                {l.ifraCategory && (
+                  <span className="text-muted-foreground ml-1">({l.ifraCategory})</span>
+                )}
+              </span>
+              <span className="font-mono">
+                {l.limitPercent != null ? fmtPercent(l.limitPercent) : "—"}
+              </span>
+            </div>
+          ))}
+        </Section>
+      )}
+
+      <Section title="Timestamps">
+        <Field
+          label="Created at"
+          value={mat.createdAt ? new Date(mat.createdAt).toLocaleString() : null}
+        />
+        <Field
+          label="Updated at"
+          value={mat.updatedAt ? new Date(mat.updatedAt).toLocaleString() : null}
+        />
+      </Section>
+    </div>
+  );
+}
+
+// ─── Create Production Batch Dialog ─────────────────────────────
+function CreateProductionBatchDialog({
+  open,
+  onOpenChange,
+  formula,
+  ingredients,
+  materials,
+  materialSources,
+  productionBatches,
+  allFormulas,
+  formulaInventoryMovements: parentFormulaInventoryMovements,
+}: {
+  open: boolean;
+
+  formula: any;
+  ingredients: any[];
+  materials: any[];
+  materialSources: any[];
+  productionBatches: any[];
+  allFormulas: any[];
+  formulaInventoryMovements: any[];
+}) {
+  const { toast } = useToast();
+  const [producedGrams, setProducedGrams] = useState<string>("");
+  const [notes, setNotes] = useState<string>("");
+  const [selectedSourceIds, setSelectedSourceIds] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [useFormulaInventory, setUseFormulaInventory] = useState(false);
+  const [finalizationSourceId, setFinalizationSourceId] = useState<string>("");
+  const [createdAtDisplay, setCreatedAtDisplay] = useState<string>("");
+  const [ackNoSource, setAckNoSource] = useState(false);
+  // Finalization mode: PRODUCTS-category / final-role formulas. Sub-formula
+  // ingredients deduct from formula_inventory (consumption_out); raw material
+  // ingredients still deduct from raw material stock — no duplicate deductions.
+  const formulaRole = String((formula as any)?.formulaRole || (formula as any)?.formula_role || "").toLowerCase();
+  const categoryName = String((formula as any)?.categoryName || (formula as any)?.category_name || (formula as any)?.formula_categories?.name || "").toLowerCase();
+  const isFinalFormula =
+    formulaRole === "final" ||
+    categoryName.includes("product") ||
+    categoryName.includes("final");
+  const isFinalizationMode = isFinalFormula;
+  // Fetch formula inventory movements directly inside the dialog, overriding
+  // the global staleTime: Infinity. refetchOnMount: "always" guarantees a
+  // fresh fetch each time the dialog opens, so production_in rows added by
+  // any other batch / tab are visible here. Fall back to the parent-provided
+  // array until the fetch resolves so the table is never blank on first
+  // render.
+  const { data: freshMovements } = useQuery<any[]>({
+    queryKey: ["/api/formula-inventory-movements"],
+    enabled: open,
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+  const formulaInventoryMovements = freshMovements ?? parentFormulaInventoryMovements ?? [];
+
+  // Belt-and-suspenders: force an active refetch when the dialog opens, in
+  // case the hook above is deduped against a cached entry and skips the
+  // network roundtrip.
+  useEffect(() => {
+    if (open) {
+      queryClient.refetchQueries({ queryKey: ["/api/formula-inventory-movements"] });
+    }
+  }, [open]);
+
+  // Build deduction rows — for each material ingredient, resolve sources + default source.
+  // For dilution-backed ingredients we deduct the weighed mass (what you
+  // physically consume from stock) while also surfacing the neat aromatic
+  // mass so the user can see how much pure material actually lands in the
+  // batch.
+  const deductionRows = useMemo(() => {
+    return ingredients
+      .filter((ing: any) => ing.sourceType === "material" && ing.materialId)
+      .map((ing: any) => {
+        const material = materials.find((m: any) => m.id === ing.materialId);
+        const sourcesForMat = (materialSources || []).filter(
+          (ms: any) => ms.materialId === ing.materialId,
+        );
+        const totalStock = sourcesForMat.reduce(
+          (s: number, src: any) => s + parseFloat(src.stockGrams || "0"),
+          0,
+        );
+        const defaultSource = sourcesForMat
+          .slice()
+          .sort(
+            (a: any, b: any) =>
+              parseFloat(b.stockGrams || "0") - parseFloat(a.stockGrams || "0"),
+          )[0];
+        return {
+          ingredientId: ing.id,
+          materialId: ing.materialId,
+          materialName: material?.name || "Unknown",
+          isDiluted: !!ing.dilutionId,
+          gramsToDeduct: stockDeductionGrams(ing),
+          gramsToWeigh: weighedGramsOf(ing),
+          neatGrams: neatGramsOf(ing),
+          sources: sourcesForMat,
+          totalStock,
+          defaultSourceId: defaultSource?.id || null,
+        };
+      });
+  }, [ingredients, materials, materialSources]);
+
+  // Normalize a formula id for consistent Map lookups: UUIDs in Supabase are
+  // lowercase canonical form, but be defensive against whitespace / casing.
+  const normalizeId = (v: any): string => (typeof v === "string" ? v.trim().toLowerCase() : "");
+
+  // Aggregate formula inventory stats per formula_id.
+  const formulaInventoryStats = useMemo(() => {
+    const map = new Map<string, { available: number; prodCost: number; prodGrams: number }>();
+    for (const m of formulaInventoryMovements || []) {
+      const fid = normalizeId(m.formulaId ?? m.formula_id);
+      if (!fid) continue;
+      const delta = parseFloat(m.gramsDelta ?? m.grams_delta ?? "0") || 0;
+      const entry = map.get(fid) || { available: 0, prodCost: 0, prodGrams: 0 };
+      entry.available += delta;
+      const type = m.movementType || m.movement_type;
+      if (type === "production_in") {
+        entry.prodCost += parseFloat(m.totalCost ?? m.total_cost ?? "0") || 0;
+        entry.prodGrams += delta;
+      }
+      map.set(fid, entry);
+    }
+    return map;
+  }, [formulaInventoryMovements]);
+
+  // Sub-formula deduction rows — ingredients sourced from another formula
+  // (accord). We deduct from that formula's inventory ledger rather than raw
+  // material stock.
+  const formulaDeductionRows = useMemo(() => {
+    return ingredients
+      .filter((ing: any) => ing.sourceType === "formula" && ing.sourceFormulaId)
+      .map((ing: any) => {
+        const subFormula = (allFormulas || []).find((f: any) => f.id === ing.sourceFormulaId);
+        const lookupKey = normalizeId(ing.sourceFormulaId);
+        const stats = formulaInventoryStats.get(lookupKey) || { available: 0, prodCost: 0, prodGrams: 0 };
+        const avgCostPerGram = stats.prodGrams > 0 ? stats.prodCost / stats.prodGrams : 0;
+        const grams = weighedGramsOf(ing);
+        return {
+          ingredientId: ing.id,
+          sourceFormulaId: ing.sourceFormulaId,
+          formulaName: subFormula?.name || "Unknown sub-formula",
+          grams,
+          available: stats.available,
+          avgCostPerGram,
+        };
+      });
+  }, [ingredients, allFormulas, formulaInventoryStats]);
+
+  // Total aromatic (neat) mass in this batch, summed across non-solvent
+  // ingredients. Useful for traceability and shown alongside the physical
+  // produced grams in the dialog header.
+  const totalNeatGrams = useMemo(() => {
+    return ingredients.reduce((sum: number, ing: any) => {
+      const mat = materials.find((m: any) => m.id === ing.materialId);
+      if (mat?.treatAsSolvent) return sum;
+      return sum + neatGramsOf(ing);
+    }, 0);
+  }, [ingredients, materials]);
+
+  const batchLabel = useMemo(() => {
+    if (!open) return "";
+    return generateBatchLabel(formula?.name || "Formula", productionBatches || []);
+  }, [open, formula?.name, productionBatches]);
+
+  // The recipe's current total grams, freshly derived from live ingredient
+  // rows. This is the single source of truth for the batch scale factor —
+  // NEVER fall back to formula.totalBatchGrams here. That DB column is only
+  // set once when the formula is first created and is never kept in sync
+  // when ingredients are edited or the formula is rescaled, so using it as
+  // a live denominator silently corrupts stock deductions (see: the
+  // "Portofino Reed" 800g/200g under-deduction incident).
+  const baseFormulaGrams = useMemo(() => {
+    return [
+      ...deductionRows.map((r: any) => r.neatGrams || 0),
+      ...formulaDeductionRows.map((r: any) => r.grams || 0),
+    ].reduce((sum: number, g: number) => sum + g, 0);
+  }, [deductionRows, formulaDeductionRows]);
+
+const missingSourceRows = useMemo(
+  () => isFinalizationMode ? [] : deductionRows.filter((r) => r.sources.length === 0 && r.gramsToDeduct > 0),
+  [deductionRows, isFinalizationMode],
+);
+const insufficientStockRows = useMemo(
+  () =>
+    isFinalizationMode
+      ? []
+      : deductionRows.filter(
+          (r) => r.sources.length > 0 && r.totalStock < r.gramsToDeduct && r.gramsToDeduct > 0,
+        ),
+  [deductionRows, isFinalizationMode],
+);
+
+  // Reset dialog state when it opens
+  useEffect(() => {
+    if (!open) return;
+    setProducedGrams(baseFormulaGrams > 0 ? String(baseFormulaGrams) : (formula?.totalBatchGrams ? String(formula.totalBatchGrams) : ""));
+    setNotes("");
+    setIsSubmitting(false);
+    setAckNoSource(false);   setUseFormulaInventory(false);   setFinalizationSourceId("");
+    const defaults: Record<string, string> = {};
+    for (const row of deductionRows) {
+      if (row.defaultSourceId) defaults[row.ingredientId] = row.defaultSourceId;
+    }
+    setSelectedSourceIds(defaults);
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    setCreatedAtDisplay(
+      `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`,
+    );
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleConfirm = async () => {
+    if (!producedGrams || isNaN(parseFloat(producedGrams))) {
+      toast({ title: "Enter produced quantity", variant: "destructive" });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const batch: any = await postJson("/api/production-batches", {
+        batchLabel,
+        formulaId: formula.id,
+        producedGrams: String(parseFloat(producedGrams) || 0),
+        producedAt: new Date().toISOString(),
+        notes: notes.trim() || null,
+      });
+
+      let deductionCount = 0;
+      let totalBatchCost = 0;
+              const producedGramsNum = parseFloat(producedGrams) || 0;
+              const batchScaleFactor = baseFormulaGrams > 0 ? producedGramsNum / baseFormulaGrams : 1;
+      let subFormulaDeductionCount = 0;
+      // Final/product formulas: source_type='material' rows still deduct from
+      // raw material stock here, while source_type='formula' rows below deduct
+      // from formula_inventory as consumption_out — no duplicate deductions.
+      for (const row of deductionRows) {
+        const sourceId = selectedSourceIds[row.ingredientId];
+        if (!sourceId) continue; // skip if no source available
+        if (row.gramsToDeduct <= 0) continue;
+        // Stock tracks neat material only, so deductions are always in neat
+        // grams. For diluted ingredients, annotate the movement with the
+        // physically-weighed mass for downstream traceability.
+        const note = row.isDiluted
+          ? `Auto-deducted for batch ${batchLabel} — diluted (weighed ${fmtGrams(row.gramsToWeigh)})`
+          : `Auto-deducted for batch ${batchLabel}`;
+        await postJson("/api/stock-movements", {
+          materialSourceId: sourceId,
+          movementType: "production",
+          gramsDelta: String(-row.gramsToDeduct * batchScaleFactor),
+          batchLabel,
+          productionBatchId: batch.id,
+          relatedFormulaId: formula.id,
+          notes: note,
+        });
+        deductionCount += 1;
+
+        // Accumulate cost based on neat grams consumed from this source
+        const src = materialSources.find((ms: any) => ms.id === sourceId);
+        const pricePerGram = parseFloat(src?.pricePerGram || src?.price_per_gram || "0") || 0;
+        totalBatchCost += row.neatGrams * batchScaleFactor * pricePerGram;
+      }
+
+      // Deduct sub-formula (accord) ingredients from formula inventory ledger.
+      for (const row of formulaDeductionRows) {
+        if (row.grams <= 0) continue;
+        try {
+          await postJson("/api/formula-inventory-movements", {
+            formulaId: row.sourceFormulaId,
+            movementType: "consumption_out",
+            gramsDelta: String(-row.grams * batchScaleFactor),
+            costPerGram: row.avgCostPerGram > 0 ? String(row.avgCostPerGram) : null,
+            totalCost: row.avgCostPerGram > 0 ? String(-(row.grams * batchScaleFactor * row.avgCostPerGram)) : null,
+            productionBatchId: batch.id,
+            relatedFormulaId: formula.id,
+            notes: `Used in batch ${batchLabel}`,
+          });
+          subFormulaDeductionCount += 1;
+          totalBatchCost += row.grams * batchScaleFactor * (row.avgCostPerGram || 0);
+        } catch (err: any) {
+          console.warn("Failed to insert formula_inventory_movements consumption_out:", err?.message || err);
+        }
+      }
+
+      // Record formula inventory production_in movement.
+      // Raw materials are already deducted — this is additive. If the insert
+      // fails, log a warning but don't block the batch creation.
+      if (producedGramsNum > 0) {
+        try {
+          const costPerGram = totalBatchCost > 0 ? totalBatchCost / producedGramsNum : 0;
+          await postJson("/api/formula-inventory-movements", {
+            formulaId: formula.id,
+            movementType: "production_in",
+            gramsDelta: String(producedGramsNum),
+            costPerGram: costPerGram > 0 ? String(costPerGram) : null,
+            totalCost: totalBatchCost > 0 ? String(totalBatchCost) : null,
+            productionBatchId: batch.id,
+            notes: `Auto-created from batch ${batchLabel}`,
+          });
+        } catch (err: any) {
+          console.warn("Failed to insert formula_inventory_movements production_in:", err?.message || err);
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["/api/production-batches"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stock-movements", "enriched"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/material-sources"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/formula-inventory-movements"] });
+
+      const subMsg = subFormulaDeductionCount > 0 ? `, ${subFormulaDeductionCount} sub-formula${subFormulaDeductionCount === 1 ? "" : "s"}` : "";
+      toast({ title: `Batch ${batchLabel} created — ${deductionCount} materials${subMsg} deducted` });
+      onOpenChange(false);
+    } catch (err: any) {
+      toast({
+        title: "Failed to create batch",
+        description: err?.message || "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!isSubmitting) onOpenChange(v); }}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+            <DialogTitle>Create Production Batch{isFinalizationMode && " (Finalization)"}</DialogTitle>
+            {isFinalFormula && (
+              <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 mt-1">Finalization batch – deduct from formula inventory only</div>
+            )}
+          </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <div className="text-muted-foreground">Formula</div>
+              <div className="font-medium">{formula?.name}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Batch label</div>
+              <div className="font-mono">{batchLabel}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Timestamp</div>
+              <div className="font-mono">{createdAtDisplay}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Produced grams</div>
+              <Input
+                value={producedGrams}
+                onChange={(e) => setProducedGrams(e.target.value)}
+                type="number"
+                step="0.1"
+                placeholder="e.g. 100"
+                className="h-8 text-sm font-mono"
+                data-testid="input-produced-grams"
+              />
+              {baseFormulaGrams > 0 && (() => {
+                const p = parseFloat(producedGrams) || 0;
+                const factor = p / baseFormulaGrams;
+                const isRoundish = Math.abs(factor - Math.round(factor)) < 0.01;
+                return (
+                  <div
+                    className={`text-[11px] mt-1 ${isRoundish ? "text-muted-foreground" : "text-amber-600"}`}
+                    data-testid="text-batch-scale-factor"
+                  >
+                    Recipe is {fmtGrams(baseFormulaGrams)} → scaling ×{factor.toFixed(2)}
+                    {!isRoundish && " — check this isn't a typo"}
+                  </div>
+                );
+              })()}
+            </div>
+            <div>
+              <div className="text-muted-foreground">Aromatic neat</div>
+              <div className="font-mono" data-testid="text-aromatic-neat-grams">
+                {fmtGrams(totalNeatGrams)}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs text-muted-foreground mb-1">Notes (optional)</div>
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              placeholder="Notes about this production batch"
+            />
+          </div>
+
+          <div>
+            <div className="text-xs font-semibold text-muted-foreground mb-2">Stock deductions</div>
+            {deductionRows.length === 0 && formulaDeductionRows.length === 0 ? (
+              <div className="text-xs text-muted-foreground p-3 bg-secondary/30 rounded border border-border">
+                No ingredients to deduct.
+              </div>
+            ) : (
+              <div className="bg-card rounded-lg border border-border overflow-hidden max-h-[40vh] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-xs text-muted-foreground">
+                      <th className="text-left p-2 pl-3">Ingredient</th>
+                      <th className="text-right p-2">Weigh (g)</th>
+                      <th className="text-right p-2">Neat (g)</th>
+                      <th className="text-right p-2">Deduct (g)</th>
+                      <th className="text-right p-2">Stock (g)</th>
+                      <th className="text-left p-2 pr-3">Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {formulaDeductionRows.map((row) => {
+                      const insufficient = row.available < row.grams && row.grams > 0;
+                      return (
+                        <tr key={row.ingredientId} className="border-b border-border/30">
+                          <td className="p-2 pl-3">
+                            {row.formulaName}
+                            <Badge variant="outline" className="ml-1 text-[9px] text-emerald-300 border-emerald-500/40">
+                              accord
+                            </Badge>
+                          </td>
+                          <td className="text-right p-2 font-mono text-xs text-muted-foreground">—</td>
+                          <td className="text-right p-2 font-mono text-xs">
+                            {fmtGrams(row.grams)}
+                          </td>
+                          <td className="text-right p-2 font-mono text-xs">
+                            {fmtGrams(row.grams)}
+                          </td>
+                          <td
+                            className={`text-right p-2 font-mono text-xs ${
+                              insufficient ? "text-red-400" : ""
+                            }`}
+                          >
+                            {fmtGrams(row.available)}
+                          </td>
+                          <td className="p-2 pr-3">
+                            <span className="text-xs text-muted-foreground">
+                              Formula inventory
+                              {insufficient && (
+                                <span className="ml-2 inline-flex items-center gap-1 text-red-500 font-semibold">
+                                  <AlertTriangle className="w-3.5 h-3.5" />
+                                  Insufficient stock
+                                </span>
+                              )}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {deductionRows.map((row) => {
+                      const noSource = row.sources.length === 0;
+                      const insufficient = !noSource && row.totalStock < row.gramsToDeduct;
+                      return (
+                        <tr key={row.ingredientId} className="border-b border-border/30">
+                          <td className="p-2 pl-3">
+                            {row.materialName}
+                            {row.isDiluted && (
+                              <Badge variant="outline" className="ml-1 text-[9px] text-[hsl(183,70%,50%)] border-[hsl(183,70%,36%)]/40">
+                                diluted
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="text-right p-2 font-mono text-xs">
+                            {fmtGrams(row.gramsToWeigh)}
+                          </td>
+                          <td className="text-right p-2 font-mono text-xs text-muted-foreground">
+                            {fmtGrams(row.neatGrams)}
+                          </td>
+                          <td
+                            className={`text-right p-2 font-mono text-xs ${
+                              row.isDiluted ? "text-amber-400 font-semibold" : ""
+                            }`}
+                          >
+                            {fmtGrams(row.gramsToDeduct)}
+                          </td>
+                          <td
+                            className={`text-right p-2 font-mono text-xs ${
+                              noSource
+                                ? "text-yellow-400"
+                                : insufficient
+                                ? "text-red-400"
+                                : ""
+                            }`}
+                          >
+                            {noSource ? "—" : fmtGrams(row.totalStock)}
+                          </td>
+                          <td className="p-2 pr-3">
+                            {noSource ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-500">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                No stock source — will NOT be deducted
+                              </span>
+                            ) : row.sources.length === 1 ? (
+                              <span className="text-xs text-muted-foreground">
+                                {fmtGrams(row.sources[0].stockGrams)} available
+                                {insufficient && (
+                                  <span className="ml-2 inline-flex items-center gap-1 text-red-500 font-semibold">
+                                    <AlertTriangle className="w-3.5 h-3.5" />
+                                    Insufficient stock
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <Select
+                                  value={selectedSourceIds[row.ingredientId] || ""}
+                                  onValueChange={(v) =>
+                                    setSelectedSourceIds((prev) => ({
+                                      ...prev,
+                                      [row.ingredientId]: v,
+                                    }))
+                                  }
+                                >
+                                  <SelectTrigger className="h-7 text-xs">
+                                    <SelectValue placeholder="Pick source" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {row.sources.map((src: any) => (
+                                      <SelectItem key={src.id} value={src.id}>
+                                        {fmtGrams(src.stockGrams)} in stock
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {insufficient && (
+                                  <span className="inline-flex items-center gap-1 text-xs text-red-500 font-semibold">
+                                    <AlertTriangle className="w-3.5 h-3.5" />
+                                    Insufficient stock
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {(missingSourceRows.length > 0 || insufficientStockRows.length > 0) && (
+            <div className="space-y-2">
+              {missingSourceRows.length > 0 && (
+                <div
+                  className="rounded-md border border-red-500/60 bg-red-500/10 p-3 text-xs"
+                  data-testid="banner-missing-source"
+                >
+                  <div className="flex items-start gap-2 text-red-500 font-semibold">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div>
+                      {missingSourceRows.length} ingredient
+                      {missingSourceRows.length === 1 ? "" : "s"} will not be deducted
+                      (no stock source):{" "}
+                      <span className="font-normal">
+                        {missingSourceRows.map((r) => r.materialName).join(", ")}
+                      </span>
+                    </div>
+                  </div>
+                  <label className="mt-2 flex items-center gap-2 text-foreground cursor-pointer">
+                    <Checkbox
+                      checked={ackNoSource}
+                      onCheckedChange={(v) => setAckNoSource(v === true)}
+                      data-testid="checkbox-ack-no-source"
+                    />
+                    <span>I understand these ingredients will not be deducted from stock</span>
+                  </label>
+                </div>
+              )}
+              {insufficientStockRows.length > 0 && (
+                <div
+                  className="rounded-md border border-red-500/60 bg-red-500/10 p-3 text-xs text-red-500"
+                  data-testid="banner-insufficient-stock"
+                >
+                  <div className="flex items-start gap-2 font-semibold">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div>
+                      {insufficientStockRows.length} ingredient
+                      {insufficientStockRows.length === 1 ? "" : "s"} have insufficient
+                      stock:{" "}
+                      <span className="font-normal">
+                        {insufficientStockRows
+                          .map(
+                            (r) =>
+                              `${r.materialName} (need ${fmtGrams(r.gramsToDeduct)}g, have ${fmtGrams(r.totalStock)}g)`,
+                          )
+                          .join(", ")}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="sticky bottom-0 bg-card pt-3 border-t border-border flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+              data-testid="button-cancel-production-batch"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirm}
+              disabled={
+                isSubmitting ||
+                !producedGrams ||
+                (missingSourceRows.length > 0 && !ackNoSource)
+              }
+              data-testid="button-confirm-production-batch"
+            >
+              {isSubmitting ? "Creating…" : "Confirm & Create Batch"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
