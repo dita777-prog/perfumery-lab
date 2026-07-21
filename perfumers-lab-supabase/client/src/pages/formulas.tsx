@@ -1,16 +1,1 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Plus, Copy, Scale, AlertTriangle, Pencil, Tag, Trash2, ChevronDown, ArrowLeft, Info, Archive, FlaskConical } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useToast } from "@/hooks/use-toast";
-import { fmtNum, fmtGrams, fmtPercent, postJson, patchJson, deleteJson, recalcPercents, calcPyramidBreakdown, scaleToTotalWeight, scaleByFactor, scaleToAbsolutePercent, scalePercentByFactor, isSolventIngredient, calcConcentratePercent, splitAromaticSolventMass, formulaSolventGrams } from "@/lib/api";
-import { neatGramsOf, weighedGramsOf, dilutionSolventGrams, neatMultiplierFor, stockDeductionGrams } from "@/lib/dilution";
+<<FULL_CONTENT>>
