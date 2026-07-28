@@ -2216,9 +2216,16 @@ function CreateProductionBatchDialog({
   // when ingredients are edited or the formula is rescaled, so using it as
   // a live denominator silently corrupts stock deductions (see: the
   // "Portofino Reed" 800g/200g under-deduction incident).
+  //
+  // This must be the WEIGHED (physical) total, not the neat aromatic total.
+  // stockDeductionGrams() deducts the physical weighed mass from stock (a
+  // 50%-diluted material's carrier leaves the shelf along with the aromatic
+  // portion — see dilution.ts), so the scale-factor denominator has to use
+  // the same basis or "producing exactly one full recipe" no longer maps to
+  // a ×1.00 scale factor for any formula containing a diluted ingredient.
   const baseFormulaGrams = useMemo(() => {
     return [
-      ...deductionRows.map((r: any) => r.neatGrams || 0),
+      ...deductionRows.map((r: any) => r.gramsToWeigh || 0),
       ...formulaDeductionRows.map((r: any) => r.grams || 0),
     ].reduce((sum: number, g: number) => sum + g, 0);
   }, [deductionRows, formulaDeductionRows]);
