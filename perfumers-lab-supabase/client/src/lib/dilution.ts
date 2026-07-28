@@ -60,12 +60,18 @@ export function neatMultiplierFor(
 }
 
 /**
- * Stock deduction amount: the pure aromatic (neat) mass. material_sources
- * tracks neat material only — the carrier/solvent in a dilution is not
- * stock, so deductions must use neatGrams, not gramsAsWeighed.
+ * Stock deduction amount: the physical (weighed) mass. material_sources
+ * tracks the material as physically purchased and stored — for a
+ * pre-diluted material (e.g. "Benzoin Resinoid, Siam 50% DPG"), the
+ * dilution percentage is part of the material's identity, not something
+ * added at weighing time. The carrier that comes with it is already
+ * physically in the bottle and leaves the shelf along with the aromatic
+ * portion, so deductions must use gramsAsWeighed, not neatGrams — using
+ * neatGrams here silently under-deducts diluted materials (e.g. a 50%
+ * material would only ever have half its true consumption recorded).
  */
 export function stockDeductionGrams(ing: IngredientLike | null | undefined): number {
-  return neatGramsOf(ing);
+  return weighedGramsOf(ing);
 }
 
 /** Solvent mass carried into the formula by this ingredient's dilution. */
