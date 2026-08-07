@@ -59,6 +59,7 @@ const urlToTable: Record<string, string> = {
   "/api/formula-categories": "formula_categories",
   "/api/suppliers": "suppliers",
   "/api/materials": "materials",
+  "/api/wishlist-materials": "wishlist_materials",
   "/api/material-sources": "material_sources",
   "/api/ifra-limits": "material_ifra_limits",
   "/api/dilutions": "material_dilutions",
@@ -149,7 +150,7 @@ export async function patchJson<T>(url: string, body: any): Promise<T> {
 
   const snakeBody = toSnakeCase(body);
   // Add updated_at if the table has it
-  const tablesWithUpdatedAt = ["materials", "material_sources", "material_dilutions", "formulas", "material_ifra_limits"];
+  const tablesWithUpdatedAt = ["materials", "material_sources", "material_dilutions", "formulas", "material_ifra_limits", "wishlist_materials"];
   if (tablesWithUpdatedAt.includes(table)) {
     snakeBody.updated_at = new Date().toISOString();
   }

@@ -84,6 +84,7 @@ async function supabaseQueryFromKey(queryKey: readonly unknown[]): Promise<any> 
     "/api/formula-categories": { table: "formula_categories", order: ["sort_order", { ascending: true }] },
     "/api/suppliers": { table: "suppliers", order: ["created_at", { ascending: false }] },
     "/api/materials": { table: "materials", order: ["name", { ascending: true }] },
+    "/api/wishlist-materials": { table: "wishlist_materials", order: ["name", { ascending: true }] },
     "/api/material-sources": { table: "material_sources", order: ["created_at", { ascending: false }] },
     "/api/dilutions": { table: "material_dilutions", order: ["created_at", { ascending: true }] },
     "/api/formulas": { table: "formulas", order: ["updated_at", { ascending: false }] },

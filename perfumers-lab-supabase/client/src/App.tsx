@@ -7,9 +7,10 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useState } from "react";
 import {
   FlaskConical, Package, Users, TestTube, Lightbulb,
-  BarChart3, Settings, Search, Menu, X, Boxes, Archive, Droplet
+  BarChart3, Settings, Search, Menu, X, Boxes, Archive, Droplet, Heart
 } from "lucide-react";
 import MaterialsPage from "./pages/materials";
+import WishlistPage from "./pages/wishlist";
 import FormulasPage from "./pages/formulas";
 import SuppliersPage from "./pages/suppliers";
 import TestsPage from "./pages/tests";
@@ -27,6 +28,7 @@ function AppLayout() {
 
   const nav = [
     { href: "/", icon: Package, label: "Materials" },
+    { href: "/wishlist", icon: Heart, label: "Wishlist" },
     { href: "/formulas", icon: FlaskConical, label: "Formulas" },
     { href: "/suppliers", icon: Users, label: "Suppliers" },
     { href: "/tests", icon: TestTube, label: "Tests" },
@@ -87,6 +89,7 @@ function AppLayout() {
         <ErrorBoundary>
           <Switch>
             <Route path="/" component={MaterialsPage} />
+            <Route path="/wishlist" component={WishlistPage} />
             <Route path="/formulas" component={FormulasPage} />
             <Route path="/formulas/:id" component={FormulasPage} />
             <Route path="/suppliers" component={SuppliersPage} />
