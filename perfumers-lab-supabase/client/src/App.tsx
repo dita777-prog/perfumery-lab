@@ -28,8 +28,8 @@ function AppLayout() {
 
   const nav = [
     { href: "/", icon: Package, label: "Materials" },
-    { href: "/wishlist", icon: Heart, label: "Wishlist" },
     { href: "/formulas", icon: FlaskConical, label: "Formulas" },
+    { href: "/wishlist", icon: Heart, label: "Wishlist" },
     { href: "/suppliers", icon: Users, label: "Suppliers" },
     { href: "/tests", icon: TestTube, label: "Tests" },
     { href: "/decisions", icon: Lightbulb, label: "Decisions" },
