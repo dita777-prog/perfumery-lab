@@ -212,7 +212,11 @@ export function CreateProductDialog({
             })}
             <ComponentPicker components={components.filter((c: any) => !usedIds.has(c.id))} lines={lineList}
               preferredLine={preferredLine}
-              onPick={(id: string) => setRows([...rows, { componentId: id, perUnit: "" }])} />
+              onPick={(id: string) => {
+                // counted items (vessel, wick, label...) default to 1 per piece; weighed ones (wax, fragrance) are typed
+                const eu = entryUnit((compById.get(id) as any)?.unit ?? "pcs");
+                setRows([...rows, { componentId: id, perUnit: eu.factor === 1 && !["g", "ml"].includes(eu.label) ? "1" : "" }]);
+              }} />
           </div>
 
           <div className="border border-border rounded-md p-3 space-y-2">
