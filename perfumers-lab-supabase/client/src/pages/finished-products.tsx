@@ -6,12 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { COMPONENT_CATEGORIES } from "./components";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { postJson, patchJson, deleteJson, fmtNum } from "@/lib/api";
 
-const PRODUCT_TYPES = ["candle", "perfume", "diffuser", "sample", "other"];
+const PRODUCT_TYPES = ["candle", "reed", "nebulizer refill", "ultrasonic oil", "perfume", "sample", "other"];
 const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
 
 // grams / millilitres are easier to type than kg / l, so those components are entered in the small unit
@@ -45,6 +48,7 @@ export function CreateProductDialog({
   const { data: products = [] } = useQuery<any[]>({ queryKey: ["/api/products"] });
   const { data: bom = [] } = useQuery<any[]>({ queryKey: ["/api/product-components"] });
   const { data: components = [] } = useQuery<any[]>({ queryKey: ["/api/components"] });
+  const { data: lineList = [] } = useQuery<any[]>({ queryKey: ["/api/component-lines"] });
 
   const [productId, setProductId] = useState("new");
   const [newName, setNewName] = useState("");
@@ -54,11 +58,13 @@ export function CreateProductDialog({
   const [fragrance, setFragrance] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [saveTemplate, setSaveTemplate] = useState(true);
-  const [addId, setAddId] = useState("");
 
   const compById = useMemo(() => new Map(components.map((c: any) => [c.id, c])), [components]);
   const unitsNum = num(units) ?? 0;
   const product = products.find((p: any) => p.id === productId);
+  // the product type decides which components are offered first (candle -> Candle line, reed -> Reed ...)
+  const productType = (productId === "new" ? newType : product?.productType) ?? "";
+  const preferredLine = lineList.find((l: any) => l.name.toLowerCase() === String(productType).toLowerCase())?.name ?? null;
 
   const valueOf = (r: Row) => {
     if (r.total !== "") return r.total;
@@ -67,7 +73,7 @@ export function CreateProductDialog({
   };
 
   const reset = () => {
-    setProductId("new"); setNewName(""); setLabel(""); setUnits(""); setFragrance(""); setRows([]); setAddId("");
+    setProductId("new"); setNewName(""); setLabel(""); setUnits(""); setFragrance(""); setRows([]);
   };
 
   const pickProduct = (id: string) => {
@@ -219,20 +225,9 @@ export function CreateProductDialog({
                 </div>
               );
             })}
-            <div className="flex gap-2 pt-1">
-              <Select value={addId} onValueChange={setAddId}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Add component (vessel, wick, wax, label...)" /></SelectTrigger>
-                <SelectContent>
-                  {components.filter((c: any) => !usedIds.has(c.id)).map((c: any) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button size="sm" variant="outline" className="h-8" disabled={!addId} data-testid="button-add-component-line"
-                onClick={() => { setRows([...rows, { componentId: addId, perUnit: null, total: "" }]); setAddId(""); }}>
-                <Plus size={12} />
-              </Button>
-            </div>
+            <ComponentPicker components={components.filter((c: any) => !usedIds.has(c.id))} lines={lineList}
+              preferredLine={preferredLine}
+              onPick={(id: string) => setRows([...rows, { componentId: id, perUnit: null, total: "" }])} />
           </div>
 
           <div className="flex items-center gap-2 text-xs">
@@ -345,5 +340,63 @@ export function FinishedProductsView() {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Searchable component chooser: type to filter by name, type or line; the product's own line is listed first. */
+function ComponentPicker({ components, lines, preferredLine, onPick }: {
+  components: any[]; lines: any[]; preferredLine: string | null; onPick: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const groups = useMemo(() => {
+    const order = [
+      ...(preferredLine ? lines.filter((l: any) => l.name === preferredLine) : []),
+      ...lines.filter((l: any) => ["Glass", "Caps", "Boxes"].includes(l.name) && l.name !== preferredLine),
+      ...lines.filter((l: any) => !["Glass", "Caps", "Boxes"].includes(l.name) && l.name !== preferredLine),
+    ];
+    const placed = new Set<string>();
+    const out: { label: string; items: any[] }[] = [];
+    for (const l of order) {
+      const items = components.filter((c: any) => !placed.has(c.id) && (c.lines ?? []).includes(l.name));
+      items.forEach((c: any) => placed.add(c.id));
+      if (items.length > 0) out.push({ label: l.name === preferredLine ? `${l.name} (suggested)` : l.name, items });
+    }
+    const rest = components.filter((c: any) => !placed.has(c.id));
+    if (rest.length > 0) out.push({ label: "Other", items: rest });
+    return out;
+  }, [components, lines, preferredLine]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="w-full justify-start text-xs text-muted-foreground h-8"
+          data-testid="button-add-component-line">
+          <Plus size={12} className="mr-1" /> Add component (vessel, wick, wax, label...)
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[420px] max-w-[90vw] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search by name, type or line (Candle, Glass, Caps...)" />
+          <CommandList className="max-h-72">
+            <CommandEmpty>No component found</CommandEmpty>
+            {groups.map(g => (
+              <CommandGroup key={g.label} heading={g.label}>
+                {g.items.map((c: any) => (
+                  <CommandItem key={c.id}
+                    value={`${c.name} ${COMPONENT_CATEGORIES[c.category] ?? c.category} ${(c.lines ?? []).join(" ")}`}
+                    onSelect={() => { onPick(c.id); setOpen(false); }}>
+                    <span className="flex-1 truncate">{c.name}</span>
+                    <span className="text-[10px] text-muted-foreground ml-2 whitespace-nowrap">
+                      {COMPONENT_CATEGORIES[c.category] ?? c.category} · {fmtNum(c.stockQty, 0)} {c.unit}
+                    </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
