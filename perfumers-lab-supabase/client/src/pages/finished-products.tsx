@@ -18,14 +18,21 @@ const PRODUCT_TYPES = ["candle", "reed", "nebulizer refill", "ultrasonic oil", "
 const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
 
 // grams / millilitres are easier to type than kg / l, so those components are entered in the small unit
-const entryUnit = (unit: string) =>
-  unit === "kg" ? { label: "g", factor: 1000 } : unit === "l" ? { label: "ml", factor: 1000 } : { label: unit, factor: 1 };
+// litres with a known density (components.specs.density, g/ml) are entered in grams as well
+const entryUnit = (unit: string, comp?: any) => {
+  if (unit === "kg") return { label: "g", factor: 1000 };
+  if (unit === "l") {
+    const d = Number(String(comp?.specs?.density ?? "").replace(",", "."));
+    return d > 0 ? { label: "g", factor: 1000 * d } : { label: "ml", factor: 1000 };
+  }
+  return { label: unit, factor: 1 };
+};
 
 const invalidate = () => {
   for (const key of [
     "/api/products", "/api/product-components", "/api/product-batches", "/api/components",
     "/api/component-sources", "/api/component-movements", "/api/component-cost-current",
-    "/api/formula-inventory-movements",
+    "/api/formula-inventory-movements", "/api/materials", "/api/stock-movements",
   ]) {
     queryClient.invalidateQueries({ queryKey: [key] });
   }
@@ -59,8 +66,11 @@ export function CreateProductDialog({
   const [units, setUnits] = useState("");
   const [fragrance, setFragrance] = useState(""); // grams for ONE unit
   const [rows, setRows] = useState<Row[]>([]);
+  const [mats, setMats] = useState<Row[]>([]); // raw materials from the Materials stock (e.g. EtOH), grams per 1 pc
+  const { data: materials = [] } = useQuery<any[]>({ queryKey: ["/api/materials"] });
   const [saveTemplate, setSaveTemplate] = useState(true);
 
+  const matById = useMemo(() => new Map(materials.map((m: any) => [m.id, m])), [materials]);
   const compById = useMemo(() => new Map(components.map((c: any) => [c.id, c])), [components]);
   const unitsNum = num(units) ?? 0;
   const product = products.find((p: any) => p.id === productId);
@@ -69,21 +79,25 @@ export function CreateProductDialog({
   const preferredLine = lineList.find((l: any) => l.name.toLowerCase() === String(productType).toLowerCase())?.name ?? null;
 
   // amount for the whole batch = amount for one unit x units made (entry units)
-  const totalOf = (r: Row) => r4((num(r.perUnit) ?? 0) * unitsNum);
+  const totalOf = (r: { perUnit: string }) => r4((num(r.perUnit) ?? 0) * unitsNum);
 
   const reset = () => {
-    setProductId("new"); setNewName(""); setLabel(""); setUnits(""); setFragrance(""); setRows([]);
+    setProductId("new"); setNewName(""); setLabel(""); setUnits(""); setFragrance(""); setRows([]); setMats([]);
   };
 
   const pickProduct = (id: string) => {
     setProductId(id);
-    if (id === "new") { setRows([]); setFragrance(""); return; }
+    if (id === "new") { setRows([]); setMats([]); setFragrance(""); return; }
     // fragrance per unit from the latest batch of this product
     const lb = batches.find((b: any) => b.productId === id && Number(b.units) > 0 && Number(b.fragranceGrams) > 0);
+    try {
+      const saved = JSON.parse(localStorage.getItem(`product-mats-${id}`) ?? "[]");
+      setMats(Array.isArray(saved) ? saved.filter((m: any) => m?.componentId) : []);
+    } catch { setMats([]); }
     setFragrance(lb ? String(r4(Number(lb.fragranceGrams) / Number(lb.units))) : "");
     // prefill from the saved bill of materials (quantities per unit, shown in g / ml where useful)
     setRows(bom.filter((b: any) => b.productId === id).map((b: any) => {
-      const eu = entryUnit((compById.get(b.componentId) as any)?.unit ?? "pcs");
+      const eu = entryUnit((compById.get(b.componentId) as any)?.unit ?? "pcs", compById.get(b.componentId));
       return { componentId: b.componentId, perUnit: String(r4(Number(b.quantityPerUnit) * eu.factor)) };
     }));
   };
@@ -107,23 +121,27 @@ export function CreateProductDialog({
       }
       const lines = rows
         .map(r => {
-          const eu = entryUnit((compById.get(r.componentId) as any)?.unit ?? "pcs");
+          const eu = entryUnit((compById.get(r.componentId) as any)?.unit ?? "pcs", compById.get(r.componentId));
           return { component_id: r.componentId, qty: totalOf(r) / eu.factor, factor: eu.factor };
         })
         .filter(l => l.qty > 0);
-      const { data, error } = await supabase.rpc("create_product_batch", {
+      const { data, error } = await supabase.rpc("create_product_batch_v2", {
         p_product_id: pid,
         p_label: label.trim(),
         p_units: unitsNum,
         p_fragrance_grams: fragGrams,
         p_deduct_fragrance: true,
         p_lines: lines.map(l => ({ component_id: l.component_id, qty: l.qty })),
+        p_materials: mats
+          .map(m => ({ material_id: m.componentId, grams: totalOf(m) }))
+          .filter(m => m.grams > 0),
       });
       if (error) throw new Error(error.message);
 
       let templateError: string | null = null;
       if (saveTemplate) {
         try {
+          localStorage.setItem(`product-mats-${pid}`, JSON.stringify(mats));
           for (const b of bom.filter((b: any) => b.productId === pid)) {
             await deleteJson(`/api/product-components/${b.id}`);
           }
@@ -156,8 +174,8 @@ export function CreateProductDialog({
 
   const valid =
     !!agg && label.trim() && unitsNum > 0 && fragGrams >= 0 && fragGrams <= avail + 1e-9 &&
-    (productId !== "new" || newName.trim()) && rows.length > 0 &&
-    rows.every(r => (num(r.perUnit) ?? 0) > 0);
+    (productId !== "new" || newName.trim()) && (rows.length > 0 || mats.length > 0) &&
+    rows.every(r => (num(r.perUnit) ?? 0) > 0) && mats.every(m => (num(m.perUnit) ?? 0) > 0);
 
   const usedIds = new Set(rows.map(r => r.componentId));
   const today = new Date().toISOString().slice(0, 10);
@@ -194,7 +212,7 @@ export function CreateProductDialog({
             </p>
             <p className="text-[10px] text-muted-foreground">Type into the framed box: amount for 1 piece (wax in g, vessel/wick in pcs).</p>
             {rows.map((r, i) => {
-              const eu = entryUnit((compById.get(r.componentId) as any)?.unit ?? "pcs");
+              const eu = entryUnit((compById.get(r.componentId) as any)?.unit ?? "pcs", compById.get(r.componentId));
               return (
                 <div key={r.componentId} className="flex items-center gap-2">
                   <span className="text-xs flex-1">{(compById.get(r.componentId) as any)?.name ?? "?"}</span>
@@ -215,9 +233,33 @@ export function CreateProductDialog({
               preferredLine={preferredLine}
               onPick={(id: string) => {
                 // counted items (vessel, wick, label...) default to 1 per piece; weighed ones (wax, fragrance) are typed
-                const eu = entryUnit((compById.get(id) as any)?.unit ?? "pcs");
+                const eu = entryUnit((compById.get(id) as any)?.unit ?? "pcs", compById.get(id));
                 setRows([...rows, { componentId: id, perUnit: eu.factor === 1 && !["g", "ml"].includes(eu.label) ? "1" : "" }]);
               }} />
+          </div>
+
+          <div className="border border-border rounded-md p-3 space-y-2">
+            <p className="text-[10px] text-muted-foreground">
+              Raw materials from the Materials stock (e.g. EtOH), grams per 1 pc. Taken from the oldest source first.
+            </p>
+            {mats.map((m, i) => (
+              <div key={m.componentId} className="flex items-center gap-2">
+                <span className="text-xs flex-1">{(matById.get(m.componentId) as any)?.name ?? "?"}</span>
+                <Input className="h-8 w-24 text-xs text-right border-primary/60 bg-background" inputMode="decimal" placeholder="0"
+                  value={m.perUnit}
+                  onChange={e => setMats(mats.map((x, j) => (j === i ? { ...x, perUnit: e.target.value } : x)))} />
+                <span className="text-xs text-muted-foreground w-8">g</span>
+                <span className="text-[10px] text-muted-foreground w-24 text-right">
+                  {unitsNum > 0 && (num(m.perUnit) ?? 0) > 0 ? `= ${fmtNum(totalOf(m), 4)} g` : ""}
+                </span>
+                <button className="text-muted-foreground hover:text-destructive" aria-label="Remove"
+                  onClick={() => setMats(mats.filter((_, j) => j !== i))}>
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+            <MaterialPicker materials={materials.filter((m: any) => !mats.some(x => x.componentId === m.id))}
+              onPick={(id: string) => setMats([...mats, { componentId: id, perUnit: "" }])} />
           </div>
 
           <div className="border border-border rounded-md p-3 space-y-2">
@@ -326,6 +368,7 @@ export function FinishedProductsView() {
                               <th className="p-2 text-right">Made</th>
                               <th className="p-2 text-right">In stock</th>
                               <th className="p-2 text-right">Components €</th>
+                              <th className="p-2 text-right">Materials €</th>
                               <th className="p-2 text-right">Fragrance €</th>
                               <th className="p-2 text-right">Tooling €</th>
                               <th className="p-2 text-right">Total €</th>
@@ -339,6 +382,7 @@ export function FinishedProductsView() {
                                 <td className="p-2 text-right font-mono">{fmtNum(b.producedQty, 2)}</td>
                                 <td className="p-2 text-right font-mono">{fmtNum(b.stockQty, 2)}</td>
                                 <td className="p-2 text-right font-mono">{fmtNum(b.componentsCostEur, 2)}</td>
+                                <td className="p-2 text-right font-mono">{fmtNum(b.materialsCostEur ?? 0, 2)}</td>
                                 <td className="p-2 text-right font-mono">{fmtNum(b.fragranceCostEur, 2)} <span className="text-muted-foreground">({fmtNum(b.fragranceGrams, 4)} g)</span></td>
                                 <td className="p-2 text-right font-mono">{fmtNum(b.toolingCostEur, 2)}</td>
                                 <td className="p-2 text-right font-mono">{fmtNum(b.totalCostEur, 2)}</td>
@@ -411,6 +455,38 @@ function ComponentPicker({ components, lines, preferredLine, onPick }: {
                 ))}
               </CommandGroup>
             ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Searchable chooser for raw materials (EtOH, solvents...). */
+function MaterialPicker({ materials, onPick }: { materials: any[]; onPick: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="w-full justify-start text-xs text-muted-foreground h-8"
+          data-testid="button-add-material-line">
+          <Plus size={12} className="mr-1" /> Add material (EtOH, solvent...)
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[420px] max-w-[90vw] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search materials" />
+          <CommandList className="max-h-72">
+            <CommandEmpty>No material found</CommandEmpty>
+            <CommandGroup>
+              {materials.map((m: any) => (
+                <CommandItem key={m.id} value={`${m.name} ${(m.altNames ?? []).join(" ")}`}
+                  onSelect={() => { onPick(m.id); setOpen(false); }}>
+                  <span className="flex-1">{m.name}</span>
+                  <span className="text-[10px] text-muted-foreground">{fmtNum(Number(m.stockGrams ?? 0), 1)} g</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
           </CommandList>
         </Command>
       </PopoverContent>
