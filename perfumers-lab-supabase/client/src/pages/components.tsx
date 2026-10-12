@@ -82,7 +82,7 @@ const SPEC_FIELDS: Record<string, SpecField[]> = {
     { key: "type", label: "Wax type" },
     { key: "melting", label: "Melting point (°C)" },
   ],
-  carrier: [{ key: "type", label: "Type" }],
+  carrier: [{ key: "type", label: "Type" }, { key: "density", label: "Density (g/ml)" }],
   label: [{ key: "size", label: "Size (mm)" }, { key: "material", label: "Material" }],
   paper_box: [{ key: "size", label: "Size (mm)" }, { key: "material", label: "Material" }],
   diffuser_device: [
