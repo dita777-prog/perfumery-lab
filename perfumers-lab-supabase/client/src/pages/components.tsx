@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { postJson, patchJson, fmtNum } from "@/lib/api";
+import { useCollapsed } from "@/lib/collapsed";
+import { CategoryHeader, CollapseAllButtons } from "@/components/category-header";
 import { supabase } from "@/lib/supabase";
 
 export const COMPONENT_CATEGORIES: Record<string, string> = {
@@ -116,8 +118,27 @@ export default function ComponentsPage() {
   const docById = useMemo(() => new Map(documents.map((d: any) => [d.id, d])), [documents]);
   const supplierById = useMemo(() => new Map(suppliers.map((s: any) => [s.id, s])), [suppliers]);
 
+  // search matches the name, type, product line, or any supplier (preferred one or from its purchases)
+  const supplierNames = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    const add = (cid: string, sid: string | null | undefined) => {
+      const n = (supplierById.get(sid as string) as any)?.name;
+      if (!n) return;
+      if (!m.has(cid)) m.set(cid, new Set());
+      m.get(cid)!.add(n.toLowerCase());
+    };
+    for (const c of components) add(c.id, c.supplierId);
+    for (const src of sources) add(src.componentId, (docById.get(src.purchaseDocumentId) as any)?.supplierId);
+    return new Map(Array.from(m, ([k, v]) => [k, Array.from(v).join(" | ")]));
+  }, [components, sources, docById, supplierById]);
+  const q = search.trim().toLowerCase();
   const filtered = components.filter((c: any) =>
-    !search || c.name.toLowerCase().includes(search.toLowerCase()));
+    !q || c.name.toLowerCase().includes(q) ||
+    (COMPONENT_CATEGORIES[c.category] ?? "").toLowerCase().includes(q) ||
+    (c.lines ?? []).some((n: string) => n.toLowerCase().includes(q)) ||
+    (supplierNames.get(c.id) ?? "").includes(q));
+  const collapsedGroups = useCollapsed("collapsed-component-groups");
+  const folded = (key: string) => !q && collapsedGroups.isCollapsed(`${groupBy}:${key}`);
 
   // a component with several lines is listed under each of them
   const grouped = useMemo(() => {
@@ -177,16 +198,20 @@ export default function ComponentsPage() {
         </div>
         <div className="px-3 py-2 relative">
           <Search size={12} className="absolute left-5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-7 h-7 text-xs" placeholder="Filter..." value={search}
+          <Input className="pl-7 h-7 text-xs" placeholder="Search name, line, type, supplier..." value={search}
             onChange={e => setSearch(e.target.value)} />
+        </div>
+        <div className="px-3 pb-1 flex">
+          <CollapseAllButtons onCollapse={() => collapsedGroups.collapseAll(grouped.map(g => `${groupBy}:${g.key}`))}
+            onExpand={collapsedGroups.expandAll} />
         </div>
         <div className="flex-1 overflow-y-auto">
           {grouped.map(g => (
             <div key={g.key}>
-              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {g.label}
-              </div>
-              {g.items.map((c: any) => {
+              <CategoryHeader label={g.label} count={g.items.length} collapsed={folded(g.key)}
+                onToggle={() => collapsedGroups.toggle(`${groupBy}:${g.key}`)}
+                className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground bg-secondary/30" />
+              {!folded(g.key) && g.items.map((c: any) => {
                 const cost = costById.get(c.id);
                 return (
                   <div key={`${g.key}-${c.id}`}
