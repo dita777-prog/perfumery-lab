@@ -71,7 +71,8 @@ export default async function handler(req: any, res: any) {
   }
 
   const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_ANON_KEY;
+  // service key: server-side only; required once RLS is enabled (the anon key is then denied)
+  const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseKey) {
     return res.status(500).json({ error: 'Supabase credentials not configured on server' });
   }

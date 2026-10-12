@@ -12,6 +12,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { postJson, fmtGrams, fmtNum } from "@/lib/api";
+import { CreateProductDialog, FinishedProductsView } from "./finished-products";
 
 type Movement = {
   id: string;
@@ -71,7 +72,8 @@ export default function FormulaInventoryPage() {
   const [usageDialog, setUsageDialog] = useState<FormulaAgg | null>(null);
   const [adjustmentDialog, setAdjustmentDialog] = useState<FormulaAgg | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [roleTab, setRoleTab] = useState<string>("accords");
+  const [view, setView] = useState<string>("fragrance");
+  const [productDialog, setProductDialog] = useState<FormulaAgg | null>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>("latest");
 
   const { data: movements = [] } = useQuery<any[]>({
@@ -172,16 +174,6 @@ export default function FormulaInventoryPage() {
       rows = rows.filter((a) => (a.categoryId || "__none__") === categoryFilter);
     }
 
-    if (roleTab === "accords") {
-      rows = rows.filter(
-        (a) => a.formulaRole === "accord" && !isProductCategory(a.categoryId, a.categoryName),
-      );
-    } else if (roleTab === "final") {
-      rows = rows.filter(
-        (a) => a.formulaRole === "final" || isProductCategory(a.categoryId, a.categoryName),
-      );
-    }
-
     const sorted = [...rows];
 
     sorted.sort((a, b) => {
@@ -215,7 +207,7 @@ export default function FormulaInventoryPage() {
     });
 
     return sorted;
-  }, [aggregated, categoryFilter, roleTab, sortOrder, productsCategoryId]);
+  }, [aggregated, categoryFilter, sortOrder, productsCategoryId]);
 
   const totalValue = useMemo(
     () => filtered.reduce((s, a) => s + (isFinite(a.inventoryValue) ? a.inventoryValue : 0), 0),
@@ -286,14 +278,14 @@ export default function FormulaInventoryPage() {
         </div>
       </div>
 
-      <Tabs value={roleTab} onValueChange={setRoleTab} className="mb-4">
+      <Tabs value={view} onValueChange={setView} className="mb-4">
         <TabsList>
-          <TabsTrigger value="accords" data-testid="tab-accords">Accords</TabsTrigger>
-          <TabsTrigger value="final" data-testid="tab-final">Final Formulas</TabsTrigger>
-          <TabsTrigger value="all" data-testid="tab-all">All</TabsTrigger>
+          <TabsTrigger value="fragrance" data-testid="tab-fragrance">Fragrance</TabsTrigger>
+          <TabsTrigger value="products" data-testid="tab-finished-products">Finished products</TabsTrigger>
         </TabsList>
       </Tabs>
 
+      {view === "products" ? <FinishedProductsView /> : (<>
       {/* Summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
         <div className="bg-card rounded-lg border border-border p-4">
@@ -389,6 +381,15 @@ export default function FormulaInventoryPage() {
                         </Button>
                         <Button
                           size="sm"
+                          className="h-7 text-[10px] px-2"
+                          onClick={() => setProductDialog(agg)}
+                          disabled={agg.availableGrams <= 0}
+                          data-testid={`button-create-product-${agg.formulaId}`}
+                        >
+                          Create product
+                        </Button>
+                        <Button
+                          size="sm"
                           variant="outline"
                           className="h-7 text-[10px] px-2"
                           onClick={() => setAdjustmentDialog(agg)}
@@ -477,6 +478,9 @@ export default function FormulaInventoryPage() {
         </table>
       </div>
 
+      </>)}
+
+      <CreateProductDialog agg={productDialog} onOpenChange={(v) => { if (!v) setProductDialog(null); }} />
       <RecordUsageDialog
         agg={usageDialog}
         onOpenChange={(v) => { if (!v) setUsageDialog(null); }}

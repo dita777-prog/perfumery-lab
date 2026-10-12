@@ -95,6 +95,16 @@ async function supabaseQueryFromKey(queryKey: readonly unknown[]): Promise<any> 
     "/api/production-batches": { table: "production_batches", order: ["produced_at", { ascending: false }] },
     "/api/formula-inventory-movements": { table: "formula_inventory_movements", order: ["created_at", { ascending: false }] },
     "/api/supplier-price-history": { table: "supplier_price_history", order: ["date_recorded", { ascending: false }] },
+    "/api/components": { table: "components", order: ["name", { ascending: true }] },
+    "/api/component-sources": { table: "component_sources", order: ["purchase_date", { ascending: false }] },
+    "/api/component-movements": { table: "component_movements", order: ["date", { ascending: false }] },
+    "/api/purchase-documents": { table: "purchase_documents", order: ["document_date", { ascending: false }] },
+    "/api/tooling-costs": { table: "tooling_costs", order: ["purchase_date", { ascending: false }] },
+    "/api/products": { table: "products", order: ["name", { ascending: true }] },
+    "/api/product-components": { table: "product_components", order: ["product_id", { ascending: true }] },
+    "/api/product-batches": { table: "product_batches", order: ["produced_at", { ascending: false }] },
+    "/api/component-cost-current": { table: "component_cost_current", order: ["name", { ascending: true }] },
+    "/api/product-cost": { table: "product_cost", order: ["name", { ascending: true }] },
     "/api/audit-log": { table: "audit_log", order: ["created_at", { ascending: false }] },
   };
 

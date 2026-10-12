@@ -267,7 +267,7 @@ export default async function handler(req: any, res: any) {
   const offsetNum = parseInt(offset as string) || 0;
   const exactMatch = exact === 'true';
 
-  const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
+  const supabase = createClient(process.env.SUPABASE_URL!, (process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY)!);
 
   if (tableName === 'materials') {
     let query = supabase
