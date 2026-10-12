@@ -12,6 +12,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
+import { useCollapsed } from "@/lib/collapsed";
+import { CategoryHeader, CollapseAllButtons } from "@/components/category-header";
 import { fmtNum, fmtGrams, fmtPercent, postJson, patchJson, deleteJson, recalcPercents, calcPyramidBreakdown, scaleToTotalWeight, scaleByFactor, scaleToAbsolutePercent, scalePercentByFactor, isSolventIngredient, calcConcentratePercent, splitAromaticSolventMass, formulaSolventGrams } from "@/lib/api";
 import { neatGramsOf, weighedGramsOf, dilutionSolventGrams, neatMultiplierFor, stockDeductionGrams } from "@/lib/dilution";
 
@@ -83,14 +85,20 @@ export default function FormulasPage() {
           return new Date(b.updated_at || b.updatedAt || 0).getTime() - new Date(a.updated_at || a.updatedAt || 0).getTime();
         });
 
+  // search matches the formula name, its commercial name or the category name
+  const q = filter.trim().toLowerCase();
+  const matches = (f: any, catName: string) =>
+    !q || (f.name || "").toLowerCase().includes(q) || (f.commercialName || "").toLowerCase().includes(q) ||
+    catName.toLowerCase().includes(q);
   const grouped = categories.map((c: any) => ({
     category: c,
-    formulas: sortedFormulas.filter((f: any) => f.categoryId === c.id)
-      .filter((f: any) => !filter || f.name.toLowerCase().includes(filter.toLowerCase()))
+    formulas: sortedFormulas.filter((f: any) => f.categoryId === c.id).filter((f: any) => matches(f, c.name || "")),
   })).filter(g => g.formulas.length > 0);
-  
-  const ungrouped = sortedFormulas.filter((f: any) => !f.categoryId)
-    .filter((f: any) => !filter || f.name.toLowerCase().includes(filter.toLowerCase()));
+
+  const ungrouped = sortedFormulas.filter((f: any) => !f.categoryId).filter((f: any) => matches(f, "Uncategorized"));
+  const collapsedCats = useCollapsed("collapsed-formula-categories");
+  // while searching, groups stay open so every hit is visible
+  const folded = (key: string) => !q && collapsedCats.isCollapsed(key);
 
   const selected = formulas.find((f: any) => f.id === selectedId);
 
@@ -112,14 +120,15 @@ export default function FormulasPage() {
                         <div className="px-3 pb-1 flex gap-1">
                                       <button onClick={() => setSortBy("name")} className={`text-[10px] px-1.5 py-0.5 rounded ${sortBy === "name" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>A→Z</button>
                                       <button onClick={() => setSortBy("updated")} className={`text-[10px] px-1.5 py-0.5 rounded ${sortBy === "updated" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>Recent</button>
+                                      <CollapseAllButtons onCollapse={() => collapsedCats.collapseAll([...categories.map((c: any) => c.id), "__none__"])} onExpand={collapsedCats.expandAll} />
                                     </div>
         <div className="flex-1 overflow-y-auto">
           {grouped.map(({ category, formulas: forms }) => (
             <div key={category.id}>
-              <div className="px-3 py-2 text-[13px] font-semibold uppercase tracking-wider text-[#60a5fa] bg-secondary/50">
-                {category.name}
-              </div>
-              {forms.map((f: any) => (
+              <CategoryHeader label={category.name} count={forms.length} collapsed={folded(category.id)}
+                onToggle={() => collapsedCats.toggle(category.id)}
+                className="px-3 py-2 text-[13px] font-semibold uppercase tracking-wider text-[#60a5fa] bg-secondary/50" />
+              {!folded(category.id) && forms.map((f: any) => (
                 <div key={f.id}
                   className={`flex items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50 transition-colors border-b border-border/30
                     ${selectedId === f.id ? 'bg-[hsl(183,70%,36%)]/10 text-[hsl(183,70%,50%)]' : 'text-foreground/80'}`}
@@ -134,8 +143,10 @@ export default function FormulasPage() {
           ))}
           {ungrouped.length > 0 && (
             <div>
-              <div className="px-3 py-2 text-[13px] font-semibold uppercase tracking-wider text-[#60a5fa] bg-secondary/50">Uncategorized</div>
-              {ungrouped.map((f: any) => (
+              <CategoryHeader label="Uncategorized" count={ungrouped.length} collapsed={folded("__none__")}
+                onToggle={() => collapsedCats.toggle("__none__")}
+                className="px-3 py-2 text-[13px] font-semibold uppercase tracking-wider text-[#60a5fa] bg-secondary/50" />
+              {!folded("__none__") && ungrouped.map((f: any) => (
                 <div key={f.id}
                   className={`flex items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/50 border-b border-border/30
                     ${selectedId === f.id ? 'bg-[hsl(183,70%,36%)]/10' : ''}`}

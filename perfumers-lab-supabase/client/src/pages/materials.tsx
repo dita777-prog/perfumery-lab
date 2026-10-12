@@ -9,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { useCollapsed } from "@/lib/collapsed";
+import { CategoryHeader, CollapseAllButtons } from "@/components/category-header";
 import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -187,6 +189,8 @@ export default function MaterialsPage() {
   const ungrouped = materials.filter((m: any) => !m.olfactiveFamilyId)
     .filter((m: any) => !filter || m.name.toLowerCase().includes(filter.toLowerCase()));
 
+  const collapsedFamilies = useCollapsed("collapsed-material-families");
+  const foldedFam = (key: string) => !filter.trim() && collapsedFamilies.isCollapsed(key);
   const materialSources = sources.filter((s: any) => s.materialId === selectedId);
 
   return (
@@ -204,6 +208,10 @@ export default function MaterialsPage() {
         </div>
         <div className="px-3 py-2">
           <Input placeholder="Filter..." value={filter} onChange={e => setFilter(e.target.value)} className="h-7 text-xs" data-testid="input-filter-materials" />
+          <div className="flex pt-1">
+            <CollapseAllButtons onCollapse={() => collapsedFamilies.collapseAll([...families.map((f: any) => f.id), "__none__"])}
+              onExpand={collapsedFamilies.expandAll} />
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
           {grouped.map(({ family, materials: mats }) => (
@@ -211,10 +219,13 @@ export default function MaterialsPage() {
               {editFamilyId === family.id ? (
                 <InlineEditFamily family={family} onClose={() => setEditFamilyId(null)} />
               ) : (
-                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider flex items-center gap-2 group/fam"
-                  style={{ color: family.color || "#888" }}>
+                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider flex items-center gap-2 group/fam cursor-pointer select-none hover:bg-secondary/40"
+                  style={{ color: family.color || "#888" }}
+                  onClick={() => collapsedFamilies.toggle(family.id)} aria-expanded={!foldedFam(family.id)}>
+                  {foldedFam(family.id) ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                   <span className="family-dot" style={{ backgroundColor: family.color || "#888" }} />
                   <span className="flex-1">{family.name}</span>
+                  <span className="text-[10px] font-normal opacity-70">{mats.length}</span>
                   <button
                     className="opacity-0 group-hover/fam:opacity-100 transition-opacity p-0.5 rounded hover:bg-secondary/60"
                     onClick={(e) => { e.stopPropagation(); setEditFamilyId(family.id); }}
@@ -224,7 +235,7 @@ export default function MaterialsPage() {
                   </button>
                 </div>
               )}
-                          {mats.map((m: any) => (
+                          {!foldedFam(family.id) && mats.map((m: any) => (
               <MaterialListItem
                 key={m.id}
                 m={m}
@@ -238,8 +249,10 @@ export default function MaterialsPage() {
           ))}
           {ungrouped.length > 0 && (
             <div>
-              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Uncategorized</div>
-                          {ungrouped.map((m: any) => (
+              <CategoryHeader label="Uncategorized" count={ungrouped.length} collapsed={foldedFam("__none__")}
+                onToggle={() => collapsedFamilies.toggle("__none__")}
+                className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground" />
+                          {!foldedFam("__none__") && ungrouped.map((m: any) => (
               <MaterialListItem
                 key={m.id}
                 m={m}
