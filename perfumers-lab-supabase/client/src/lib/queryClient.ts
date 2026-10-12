@@ -96,6 +96,7 @@ async function supabaseQueryFromKey(queryKey: readonly unknown[]): Promise<any> 
     "/api/formula-inventory-movements": { table: "formula_inventory_movements", order: ["created_at", { ascending: false }] },
     "/api/supplier-price-history": { table: "supplier_price_history", order: ["date_recorded", { ascending: false }] },
     "/api/components": { table: "components", order: ["name", { ascending: true }] },
+    "/api/component-lines": { table: "component_lines", order: ["sort_order", { ascending: true }] },
     "/api/component-sources": { table: "component_sources", order: ["purchase_date", { ascending: false }] },
     "/api/component-movements": { table: "component_movements", order: ["date", { ascending: false }] },
     "/api/purchase-documents": { table: "purchase_documents", order: ["document_date", { ascending: false }] },

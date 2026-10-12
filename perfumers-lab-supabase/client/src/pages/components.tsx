@@ -1,7 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useMemo, useState } from "react";
-import { Plus, Search, Pencil } from "lucide-react";
+import { Plus, Search, Pencil, Tag, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -45,10 +45,59 @@ const invalidateCosts = () => {
 
 const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
 
+type SpecField = { key: string; label: string; col?: string; numeric?: boolean };
+// real columns (col) or free-form values kept in components.specs (single-word keys only)
+const SPEC_FIELDS: Record<string, SpecField[]> = {
+  glass: [
+    { key: "volumeMl", col: "volumeMl", label: "Volume (ml)", numeric: true },
+    { key: "neckSize", col: "neckSize", label: "Neck size" },
+    { key: "unitWeightG", col: "unitWeightG", label: "Weight (g)", numeric: true },
+    { key: "color", label: "Colour" },
+  ],
+  ceramic: [
+    { key: "volumeMl", col: "volumeMl", label: "Volume (ml)", numeric: true },
+    { key: "unitWeightG", col: "unitWeightG", label: "Weight (g)", numeric: true },
+    { key: "diameter", label: "Diameter (mm)" },
+    { key: "height", label: "Height (mm)" },
+    { key: "color", label: "Colour / glaze" },
+  ],
+  closure: [
+    { key: "neckSize", col: "neckSize", label: "Neck size" },
+    { key: "material", label: "Material" },
+    { key: "color", label: "Colour" },
+  ],
+  stick: [
+    { key: "length", label: "Length (mm)" },
+    { key: "diameter", label: "Diameter (mm)" },
+    { key: "material", label: "Material" },
+  ],
+  wick: [
+    { key: "series", label: "Series" },
+    { key: "diameter", label: "For vessel diameter (mm)" },
+    { key: "material", label: "Material" },
+  ],
+  wax: [
+    { key: "type", label: "Wax type" },
+    { key: "melting", label: "Melting point (°C)" },
+  ],
+  carrier: [{ key: "type", label: "Type" }],
+  label: [{ key: "size", label: "Size (mm)" }, { key: "material", label: "Material" }],
+  paper_box: [{ key: "size", label: "Size (mm)" }, { key: "material", label: "Material" }],
+  diffuser_device: [
+    { key: "model", label: "Model" },
+    { key: "power", label: "Power" },
+    { key: "color", label: "Colour" },
+  ],
+  other: [],
+};
+
 export default function ComponentsPage() {
+  const { toast } = useToast();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [groupBy, setGroupBy] = useState<"line" | "type">("line");
   const [showCreate, setShowCreate] = useState(false);
+  const [showAddLine, setShowAddLine] = useState(false);
   const [showPurchase, setShowPurchase] = useState(false);
   const [showMovement, setShowMovement] = useState(false);
   const [showTooling, setShowTooling] = useState(false);
@@ -56,6 +105,7 @@ export default function ComponentsPage() {
   const [fxDoc, setFxDoc] = useState<any>(null);
 
   const { data: components = [] } = useQuery<any[]>({ queryKey: ["/api/components"] });
+  const { data: lines = [] } = useQuery<any[]>({ queryKey: ["/api/component-lines"] });
   const { data: costs = [] } = useQuery<any[]>({ queryKey: ["/api/component-cost-current"] });
   const { data: sources = [] } = useQuery<any[]>({ queryKey: ["/api/component-sources"] });
   const { data: documents = [] } = useQuery<any[]>({ queryKey: ["/api/purchase-documents"] });
@@ -68,45 +118,85 @@ export default function ComponentsPage() {
 
   const filtered = components.filter((c: any) =>
     !search || c.name.toLowerCase().includes(search.toLowerCase()));
-  const grouped = Object.keys(COMPONENT_CATEGORIES)
-    .map(cat => ({ cat, items: filtered.filter((c: any) => c.category === cat) }))
-    .filter(g => g.items.length > 0);
+
+  // a component with several lines is listed under each of them
+  const grouped = useMemo(() => {
+    if (groupBy === "type") {
+      return Object.keys(COMPONENT_CATEGORIES)
+        .map(k => ({ key: k, label: COMPONENT_CATEGORIES[k], items: filtered.filter((c: any) => c.category === k) }))
+        .filter(g => g.items.length > 0);
+    }
+    const out = lines.map((l: any) => ({
+      key: l.id, label: l.name,
+      items: filtered.filter((c: any) => (c.lines ?? []).includes(l.name)),
+    }));
+    const known = new Set(lines.map((l: any) => l.name));
+    out.push({
+      key: "none", label: "No line yet",
+      items: filtered.filter((c: any) => !(c.lines ?? []).some((n: string) => known.has(n))),
+    });
+    return out.filter(g => g.items.length > 0);
+  }, [groupBy, filtered, lines]);
 
   const selected = components.find((c: any) => c.id === selectedId);
   const selCost = selected ? costById.get(selected.id) : null;
   const selTooling = selected ? tooling.filter((t: any) => t.componentId === selected.id) : [];
   const selSources = selected ? sources.filter((s: any) => s.componentId === selected.id) : [];
 
+  const patch = useMutation({
+    mutationFn: (body: any) => patchJson(`/api/components/${selected!.id}`, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/components"] }),
+    onError: (e: any) => toast({ title: "Could not save", description: e.message, variant: "destructive" }),
+  });
+
+  const toggleLine = (name: string) => {
+    const cur: string[] = selected.lines ?? [];
+    patch.mutate({ lines: cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name] });
+  };
+
   return (
     <div className="panel-layout h-full">
-      <div className="border-r border-border flex flex-col h-full overflow-hidden">
-        <div className="p-3 border-b border-border flex items-center gap-2">
+      <div className={`border-r border-border flex-col h-full overflow-hidden ${selectedId ? "hidden md:flex" : "flex"}`}>
+        <div className="p-3 pl-12 md:pl-3 border-b border-border flex items-center gap-2">
           <h2 className="text-sm font-semibold flex-1">Components</h2>
+          <Button size="sm" variant="ghost" onClick={() => setShowAddLine(true)} title="Add product line" data-testid="button-add-line">
+            <Tag size={14} />
+          </Button>
           <Button size="sm" variant="ghost" onClick={() => setShowCreate(true)} data-testid="button-add-component">
             <Plus size={14} />
           </Button>
         </div>
-        <div className="p-2 border-b border-border relative">
-          <Search size={12} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-7 h-8 text-xs" placeholder="Search components" value={search}
+        <div className="px-3 pt-2 flex gap-1">
+          {(["line", "type"] as const).map(g => (
+            <button key={g} onClick={() => setGroupBy(g)} data-testid={`group-by-${g}`}
+              className={`text-[10px] px-2 py-1 rounded-full border ${groupBy === g
+                ? "border-[hsl(183,70%,36%)] bg-[hsl(183,70%,36%)]/15" : "border-border text-muted-foreground"}`}>
+              {g === "line" ? "By product line" : "By type"}
+            </button>
+          ))}
+        </div>
+        <div className="px-3 py-2 relative">
+          <Search size={12} className="absolute left-5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input className="pl-7 h-7 text-xs" placeholder="Filter..." value={search}
             onChange={e => setSearch(e.target.value)} />
         </div>
         <div className="flex-1 overflow-y-auto">
           {grouped.map(g => (
-            <div key={g.cat}>
-              <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground bg-secondary/30">
-                {COMPONENT_CATEGORIES[g.cat]}
+            <div key={g.key}>
+              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {g.label}
               </div>
               {g.items.map((c: any) => {
                 const cost = costById.get(c.id);
                 return (
-                  <div key={c.id}
+                  <div key={`${g.key}-${c.id}`}
                     className={`px-3 py-2 cursor-pointer hover:bg-secondary/50 border-b border-border/30
                       ${selectedId === c.id ? "bg-[hsl(183,70%,36%)]/10" : ""}`}
                     onClick={() => setSelectedId(c.id)}
                     data-testid={`component-item-${c.id}`}>
                     <p className="text-sm font-medium">{c.name}</p>
                     <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground">
+                      {groupBy === "line" && <span>{COMPONENT_CATEGORIES[c.category] ?? c.category}</span>}
                       <span>{fmtNum(c.stockQty, 2)} {c.unit}</span>
                       <span className="font-mono">
                         {cost?.wavgLandedCostEur != null ? `€ ${fmtNum(cost.wavgLandedCostEur, 4)}` : "€ —"}
@@ -123,126 +213,175 @@ export default function ComponentsPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className={`flex-1 overflow-y-auto ${selectedId ? "" : "hidden md:block"}`}>
         {selected ? (
-          <div className="p-6 max-w-5xl">
-            <div className="flex items-start justify-between mb-4 gap-4">
-              <div>
-                <h1 className="text-xl font-semibold">{selected.name}</h1>
-                <div className="flex gap-2 mt-1">
-                  <Badge variant="secondary">{COMPONENT_CATEGORIES[selected.category] ?? selected.category}</Badge>
-                  {selected.volumeMl && <Badge variant="outline">{fmtNum(selected.volumeMl)} ml</Badge>}
-                  {selected.neckSize && <Badge variant="outline">{selected.neckSize}</Badge>}
+          <div>
+            <button className="md:hidden flex items-center gap-1 p-3 pl-12 text-sm text-muted-foreground hover:text-foreground border-b border-border w-full"
+              onClick={() => setSelectedId(null)}>
+              <ChevronRight className="rotate-180 h-4 w-4" /> Back to list
+            </button>
+            <div className="p-6 max-w-4xl space-y-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <InlineText key={`name-${selected.id}`} className="text-xl font-semibold" value={selected.name}
+                    onSave={(v) => v.trim() && patch.mutate({ name: v.trim() })} />
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <Badge variant="secondary">{COMPONENT_CATEGORIES[selected.category] ?? selected.category}</Badge>
+                    {(selected.lines ?? []).map((n: string) => <Badge key={n} variant="outline">{n}</Badge>)}
+                  </div>
                 </div>
-                {selected.notes && <p className="text-xs text-muted-foreground mt-2 max-w-xl">{selected.notes}</p>}
+                <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+                  <Button size="sm" variant="outline" onClick={() => setShowMovement(true)}
+                    disabled={selSources.length === 0} data-testid="button-component-movement">
+                    Usage / correction
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setShowTooling(true)} data-testid="button-add-tooling">
+                    Add tooling
+                  </Button>
+                  <Button size="sm" onClick={() => setShowPurchase(true)} data-testid="button-add-purchase">
+                    <Plus size={14} className="mr-1" /> Add purchase
+                  </Button>
+                </div>
               </div>
-              <div className="flex gap-2 shrink-0">
-                <Button size="sm" variant="outline" onClick={() => setShowMovement(true)}
-                  disabled={selSources.length === 0} data-testid="button-component-movement">
-                  Usage / correction
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setShowTooling(true)} data-testid="button-add-tooling">
-                  Add tooling
-                </Button>
-                <Button size="sm" onClick={() => setShowPurchase(true)} data-testid="button-add-purchase">
-                  <Plus size={14} className="mr-1" /> Add purchase
-                </Button>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <StatCard label="In stock" value={`${fmtNum(selected.stockQty, 2)} ${selected.unit}`} />
+                <StatCard label="Last landed cost" hint="next production run"
+                  value={selCost?.lastLandedCostEur != null ? `€ ${fmtNum(selCost.lastLandedCostEur, 4)}` : "—"} />
+                <StatCard label="Weighted avg. of stock" hint="margin on goods in stock"
+                  value={selCost?.wavgLandedCostEur != null ? `€ ${fmtNum(selCost.wavgLandedCostEur, 4)}` : "—"} />
+                <StatCard label="Stock value"
+                  value={selCost?.stockValueEur != null ? `€ ${fmtNum(selCost.stockValueEur, 2)}` : "—"} />
               </div>
-            </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-              <StatCard label="In stock" value={`${fmtNum(selected.stockQty, 2)} ${selected.unit}`} />
-              <StatCard label="Last landed cost" hint="next production run"
-                value={selCost?.lastLandedCostEur != null ? `€ ${fmtNum(selCost.lastLandedCostEur, 4)}` : "—"} />
-              <StatCard label="Weighted avg. of stock" hint="margin on goods in stock"
-                value={selCost?.wavgLandedCostEur != null ? `€ ${fmtNum(selCost.wavgLandedCostEur, 4)}` : "—"} />
-              <StatCard label="Stock value"
-                value={selCost?.stockValueEur != null ? `€ ${fmtNum(selCost.stockValueEur, 2)}` : "—"} />
-            </div>
+              <section className="bg-card rounded-lg border border-border p-4 space-y-4">
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-1.5">Product lines (click to add or remove)</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {lines.map((l: any) => {
+                      const on = (selected.lines ?? []).includes(l.name);
+                      return (
+                        <button key={l.id} onClick={() => toggleLine(l.name)} data-testid={`toggle-line-${l.name}`}
+                          className={`text-xs px-2.5 py-1 rounded-full border ${on
+                            ? "border-[hsl(183,70%,36%)] bg-[hsl(183,70%,36%)]/15" : "border-border text-muted-foreground hover:bg-secondary/50"}`}>
+                          {l.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
-            <h3 className="text-sm font-semibold mb-2">Purchases ({selSources.length})</h3>
-            <div className="bg-card border border-border rounded-lg overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-muted-foreground border-b border-border">
-                    <th className="p-2">Date</th>
-                    <th className="p-2">Invoice</th>
-                    <th className="p-2 text-right">Qty</th>
-                    <th className="p-2 text-right">Unit net</th>
-                    <th className="p-2 text-right">VAT %</th>
-                    <th className="p-2 text-right">Unit gross</th>
-                    <th className="p-2 text-right">Freight/unit</th>
-                    <th className="p-2 text-right">Landed</th>
-                    <th className="p-2 text-right">Landed €</th>
-                    <th className="p-2 text-right">Left</th>
-                    <th className="p-2" />
-                  </tr>
-                </thead>
-                <tbody>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="text-[10px] text-muted-foreground">Type
+                    <Select value={selected.category} onValueChange={(v) => patch.mutate({ category: v })}>
+                      <SelectTrigger className="mt-1 h-8 text-xs text-foreground"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(COMPONENT_CATEGORIES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <label className="text-[10px] text-muted-foreground">Preferred supplier
+                    <Select value={selected.supplierId ?? "none"}
+                      onValueChange={(v) => patch.mutate({ supplierId: v === "none" ? null : v })}>
+                      <SelectTrigger className="mt-1 h-8 text-xs text-foreground"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">—</SelectItem>
+                        {suppliers.map((s: any) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  {(SPEC_FIELDS[selected.category] ?? []).map(f => {
+                    const raw = f.col ? selected[f.col] : (selected.specs ?? {})[f.key];
+                    return (
+                      <InlineField key={`${selected.id}-${f.key}`} label={f.label}
+                        value={raw == null ? "" : String(f.numeric ? Number(raw) : raw)}
+                        onSave={(v) => {
+                          if (f.col) patch.mutate({ [f.col]: f.numeric ? num(v) : (v.trim() || null) });
+                          else patch.mutate({ specs: { ...(selected.specs ?? {}), [f.key]: v.trim() } });
+                        }} />
+                    );
+                  })}
+                  <InlineField key={`${selected.id}-reorder`} label={`Reorder threshold (${selected.unit})`}
+                    value={selected.reorderThreshold == null ? "" : String(Number(selected.reorderThreshold))}
+                    onSave={(v) => patch.mutate({ reorderThreshold: num(v) })} />
+                </div>
+
+                <label className="text-[10px] text-muted-foreground block">Notes
+                  <Textarea key={`notes-${selected.id}`} className="mt-1 text-xs text-foreground min-h-[60px]"
+                    defaultValue={selected.notes ?? ""}
+                    onBlur={(e) => { if (e.target.value !== (selected.notes ?? "")) patch.mutate({ notes: e.target.value || null }); }} />
+                </label>
+              </section>
+
+              <section>
+                <h3 className="text-sm font-semibold mb-2">Purchases ({selSources.length})</h3>
+                <div className="space-y-2">
                   {selSources.map((s: any) => {
                     const doc: any = docById.get(s.purchaseDocumentId);
                     const sup: any = doc ? supplierById.get(doc.supplierId) : null;
                     const cur = doc?.currency ?? "EUR";
                     return (
-                      <tr key={s.id} className="border-b border-border/30">
-                        <td className="p-2 whitespace-nowrap">{s.purchaseDate}</td>
-                        <td className="p-2">
-                          {doc ? `${doc.documentNo}${sup ? ` · ${sup.name}` : ""}` : "—"}
-                          {s.costType !== "material" && <Badge variant="outline" className="ml-2 text-[9px]">{s.costType}</Badge>}
-                          {doc && !doc.vatRecoverable && Number(s.vatRate) > 0 &&
-                            <Badge variant="outline" className="ml-2 text-[9px]">VAT = cost</Badge>}
-                        </td>
-                        <td className="p-2 text-right font-mono">{fmtNum(s.purchaseQuantity, 2)}</td>
-                        <td className="p-2 text-right font-mono">{fmtNum(s.unitPriceNet, 4)} {cur}</td>
-                        <td className="p-2 text-right font-mono">{fmtNum(s.vatRate, 2)}</td>
-                        <td className="p-2 text-right font-mono">{fmtNum(s.unitPriceGross, 4)}</td>
-                        <td className="p-2 text-right font-mono">{fmtNum(s.freightShare, 4)}</td>
-                        <td className="p-2 text-right font-mono">{fmtNum(s.landedUnitCost, 4)} {cur}</td>
-                        <td className="p-2 text-right font-mono">
-                          {s.landedUnitCostEur != null
-                            ? fmtNum(s.landedUnitCostEur, 4)
-                            : <button className="text-yellow-500 underline underline-offset-2 hover:text-yellow-400"
-                              onClick={() => doc && setFxDoc(doc)} data-testid={`button-fx-missing-${s.id}`}>FX missing</button>}
-                        </td>
-                        <td className="p-2 text-right font-mono">{fmtNum(s.stockQty, 2)}</td>
-                        <td className="p-2 text-right">
+                      <div key={s.id} className="bg-card rounded-lg p-3 border border-border" data-testid={`purchase-card-${s.id}`}>
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="text-xs">
+                            <span className="font-medium">{sup?.name ?? "No supplier"}</span>
+                            <span className="text-muted-foreground"> · invoice {doc?.documentNo ?? "—"} · {s.purchaseDate}</span>
+                            {s.costType !== "material" && <Badge variant="outline" className="ml-2 text-[9px]">{s.costType}</Badge>}
+                            {doc && !doc.vatRecoverable && Number(s.vatRate) > 0 &&
+                              <Badge variant="outline" className="ml-2 text-[9px]">VAT = cost</Badge>}
+                          </div>
                           <button className="text-muted-foreground hover:text-foreground" aria-label="Edit purchase"
                             onClick={() => setEditSource(s)} data-testid={`button-edit-purchase-${s.id}`}>
-                            <Pencil size={12} />
+                            <Pencil size={13} />
                           </button>
-                        </td>
-                      </tr>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2 text-xs">
+                          <KV k="Quantity" v={fmtNum(s.purchaseQuantity, 2)} />
+                          <KV k={`Unit net (${cur})`} v={fmtNum(s.unitPriceNet, 4)} />
+                          <KV k="VAT %" v={fmtNum(s.vatRate, 2)} />
+                          <KV k={`Unit gross (${cur})`} v={fmtNum(s.unitPriceGross, 4)} />
+                          <KV k="Freight / unit" v={fmtNum(s.freightShare, 4)} />
+                          <KV k={`Landed (${cur})`} v={fmtNum(s.landedUnitCost, 4)} />
+                          <div>
+                            <div className="text-[10px] text-muted-foreground">Landed €</div>
+                            {s.landedUnitCostEur != null
+                              ? <span className="font-mono">{fmtNum(s.landedUnitCostEur, 4)}</span>
+                              : <button className="text-yellow-500 underline underline-offset-2 hover:text-yellow-400"
+                                  onClick={() => doc && setFxDoc(doc)} data-testid={`button-fx-missing-${s.id}`}>FX missing — enter rate</button>}
+                          </div>
+                          <KV k="Left in stock" v={fmtNum(s.stockQty, 2)} />
+                        </div>
+                      </div>
                     );
                   })}
                   {selSources.length === 0 && (
-                    <tr><td colSpan={11} className="p-4 text-center text-muted-foreground">No purchases yet.</td></tr>
+                    <p className="text-xs text-muted-foreground bg-card border border-border rounded-lg p-4 text-center">No purchases yet.</p>
                   )}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-2">
-              Landed cost = net price + allocated freight + per-unit setup (+ VAT when it is not recoverable).
-              It is frozen when the purchase is saved and never recalculated.
-            </p>
-            {selTooling.length > 0 && (
-              <>
-                <h3 className="text-sm font-semibold mt-6 mb-2">One-off tooling (amortised per finished unit, not in landed cost)</h3>
-                <div className="bg-card border border-border rounded-lg overflow-x-auto">
-                  <table className="w-full text-xs"><tbody>
-                    {selTooling.map((t: any) => (
-                      <tr key={t.id} className="border-b border-border/30">
-                        <td className="p-2">{t.description}</td>
-                        <td className="p-2 text-right font-mono">{fmtNum(t.cost)} {t.currency}</td>
-                        <td className="p-2 text-right text-muted-foreground">over {t.amortiseOverUnits} units</td>
-                        <td className="p-2 text-right font-mono">
-                          € {fmtNum((Number(t.cost) * Number(t.fxRateToEur)) / Number(t.amortiseOverUnits), 4)} / unit
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody></table>
                 </div>
-              </>
-            )}
+                <p className="text-[10px] text-muted-foreground mt-2">
+                  Landed cost = net price + allocated freight + per-unit setup (+ VAT when it is not recoverable).
+                  Finished batches keep the cost they were made with.
+                </p>
+              </section>
+
+              {selTooling.length > 0 && (
+                <section>
+                  <h3 className="text-sm font-semibold mb-2">One-off tooling (amortised per finished unit, not in landed cost)</h3>
+                  <div className="space-y-2">
+                    {selTooling.map((t: any) => (
+                      <div key={t.id} className="bg-card rounded-lg p-3 border border-border flex flex-wrap justify-between gap-2 text-xs">
+                        <span>{t.description}</span>
+                        <span className="font-mono">{fmtNum(t.cost)} {t.currency}</span>
+                        <span className="text-muted-foreground">over {t.amortiseOverUnits} units</span>
+                        <span className="font-mono">
+                          € {fmtNum((Number(t.cost) * Number(t.fxRateToEur)) / Number(t.amortiseOverUnits), 4)} / unit
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
           </div>
         ) : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
@@ -252,19 +391,74 @@ export default function ComponentsPage() {
       </div>
 
       <CreateComponentDialog open={showCreate} onOpenChange={setShowCreate} onCreated={setSelectedId} />
+      <AddLineDialog open={showAddLine} onOpenChange={setShowAddLine} count={lines.length} />
+      <FxDialog doc={fxDoc} onClose={() => setFxDoc(null)} />
+      <EditPurchaseDialog source={editSource} onClose={() => setEditSource(null)}
+        currency={(docById.get(editSource?.purchaseDocumentId) as any)?.currency ?? "EUR"} />
       {selected && (
         <>
+          <AddToolingDialog open={showTooling} onOpenChange={setShowTooling} component={selected} />
           <AddPurchaseDialog open={showPurchase} onOpenChange={setShowPurchase} component={selected}
             documents={documents} suppliers={suppliers} />
-          <FxDialog doc={fxDoc} onClose={() => setFxDoc(null)} />
-          <EditPurchaseDialog source={editSource} onClose={() => setEditSource(null)}
-            currency={(docById.get(editSource?.purchaseDocumentId) as any)?.currency ?? "EUR"} />
-          <AddToolingDialog open={showTooling} onOpenChange={setShowTooling} component={selected} />
           <MovementDialog open={showMovement} onOpenChange={setShowMovement} component={selected}
             sources={selSources} docById={docById} />
         </>
       )}
     </div>
+  );
+}
+
+function KV({ k, v }: { k: string; v: string }) {
+  return (
+    <div>
+      <div className="text-[10px] text-muted-foreground">{k}</div>
+      <span className="font-mono">{v}</span>
+    </div>
+  );
+}
+
+/** Text that saves when you leave the field */
+function InlineText({ value, onSave, className }: { value: string; onSave: (v: string) => void; className?: string }) {
+  const [v, setV] = useState(value);
+  return (
+    <input className={`bg-transparent w-full outline-none border-b border-transparent focus:border-border ${className ?? ""}`}
+      value={v} onChange={e => setV(e.target.value)}
+      onBlur={() => { if (v !== value) onSave(v); }} />
+  );
+}
+
+function InlineField({ label, value, onSave }: { label: string; value: string; onSave: (v: string) => void }) {
+  const [v, setV] = useState(value);
+  return (
+    <label className="text-[10px] text-muted-foreground">
+      {label}
+      <Input className="mt-1 h-8 text-xs text-foreground" value={v} onChange={e => setV(e.target.value)}
+        onBlur={() => { if (v !== value) onSave(v); }} />
+    </label>
+  );
+}
+
+function AddLineDialog({ open, onOpenChange, count }: any) {
+  const { toast } = useToast();
+  const [name, setName] = useState("");
+  const mutation = useMutation({
+    mutationFn: () => postJson("/api/component-lines", { name: name.trim(), sortOrder: count + 1 }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/component-lines"] });
+      setName(""); onOpenChange(false);
+    },
+    onError: (e: any) => toast({ title: "Could not add line", description: e.message, variant: "destructive" }),
+  });
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-border">
+        <DialogHeader><DialogTitle>New product line</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <Input placeholder="e.g. Room spray" value={name} onChange={e => setName(e.target.value)} data-testid="input-line-name" />
+          <Button className="w-full" disabled={!name.trim() || mutation.isPending} onClick={() => mutation.mutate()}>Add</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
