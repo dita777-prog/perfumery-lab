@@ -72,6 +72,13 @@ const urlToTable: Record<string, string> = {
   "/api/formula-inventory-movements": "formula_inventory_movements",
   "/api/supplier-price-history": "supplier_price_history",
   "/api/attachments": "attachments",
+  "/api/components": "components",
+  "/api/component-sources": "component_sources",
+  "/api/component-movements": "component_movements",
+  "/api/purchase-documents": "purchase_documents",
+  "/api/tooling-costs": "tooling_costs",
+  "/api/products": "products",
+  "/api/product-components": "product_components",
 };
 
 /** Convert camelCase keys to snake_case for Supabase inserts/updates */
@@ -150,7 +157,7 @@ export async function patchJson<T>(url: string, body: any): Promise<T> {
 
   const snakeBody = toSnakeCase(body);
   // Add updated_at if the table has it
-  const tablesWithUpdatedAt = ["materials", "material_sources", "material_dilutions", "formulas", "material_ifra_limits", "wishlist_materials"];
+  const tablesWithUpdatedAt = ["materials", "material_sources", "material_dilutions", "formulas", "material_ifra_limits", "wishlist_materials", "components"];
   if (tablesWithUpdatedAt.includes(table)) {
     snakeBody.updated_at = new Date().toISOString();
   }

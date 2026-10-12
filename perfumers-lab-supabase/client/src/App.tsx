@@ -4,10 +4,13 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "./lib/supabase";
 import {
   FlaskConical, Package, Users, TestTube, Lightbulb,
-  BarChart3, Settings, Search, Menu, X, Boxes, Archive, Droplet, Heart
+  BarChart3, Settings, Search, Menu, X, Boxes, Archive, Droplet, Heart,
+  Layers, ReceiptText, Tag, LogOut
 } from "lucide-react";
 import MaterialsPage from "./pages/materials";
 import WishlistPage from "./pages/wishlist";
@@ -20,6 +23,10 @@ import FormulaInventoryPage from "./pages/formula-inventory";
 import SettingsPage from "./pages/settings";
 import SearchPage from "./pages/search";
 import ArchivePage from "./pages/archive";
+import ComponentsPage from "./pages/components";
+import InvoicesPage from "./pages/invoices";
+import ProductsPage from "./pages/products";
+import LoginPage from "./pages/login";
 import NotFound from "./pages/not-found";
 
 function AppLayout() {
@@ -35,6 +42,9 @@ function AppLayout() {
     { href: "/decisions", icon: Lightbulb, label: "Decisions" },
     { href: "/stock", icon: Boxes, label: "Stock" },
     { href: "/formula-inventory", icon: Droplet, label: "Formula Inventory" },
+    { href: "/components", icon: Layers, label: "Components" },
+    { href: "/invoices", icon: ReceiptText, label: "Invoices" },
+    { href: "/products", icon: Tag, label: "Products" },
     { href: "/search", icon: Search, label: "Search" },
     { href: "/archive", icon: Archive, label: "Archive" },
     { href: "/settings", icon: Settings, label: "Settings" },
@@ -82,6 +92,14 @@ function AppLayout() {
             );
           })}
         </nav>
+        <button
+          className="flex items-center gap-3 px-4 py-3 border-t border-border text-sm text-muted-foreground hover:text-foreground"
+          onClick={() => supabase.auth.signOut()}
+          data-testid="button-sign-out"
+        >
+          <LogOut size={16} />
+          <span>Sign out</span>
+        </button>
       </aside>
 
       {/* Main content */}
@@ -97,6 +115,9 @@ function AppLayout() {
             <Route path="/decisions" component={DecisionsPage} />
             <Route path="/stock" component={StockPage} />
             <Route path="/formula-inventory" component={FormulaInventoryPage} />
+            <Route path="/components" component={ComponentsPage} />
+            <Route path="/invoices" component={InvoicesPage} />
+            <Route path="/products" component={ProductsPage} />
             <Route path="/search" component={SearchPage} />
             <Route path="/archive" component={ArchivePage} />
             <Route path="/settings" component={SettingsPage} />
@@ -114,12 +135,32 @@ function AppLayout() {
 }
 
 function App() {
+  // undefined = still checking the stored session, null = signed out
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
+      setSession(next);
+      if (!next) queryClient.clear();
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  if (session === undefined) {
+    return <div className="min-h-screen bg-background" />;
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
-      <Router hook={useHashLocation}>
-        <AppLayout />
-        <Toaster />
-      </Router>
+      {session ? (
+        <Router hook={useHashLocation}>
+          <AppLayout />
+          <Toaster />
+        </Router>
+      ) : (
+        <LoginPage />
+      )}
     </QueryClientProvider>
   );
 }
