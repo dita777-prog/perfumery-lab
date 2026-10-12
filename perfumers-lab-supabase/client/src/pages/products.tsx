@@ -5,6 +5,8 @@ import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { supabase } from "@/lib/supabase";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -14,7 +16,11 @@ const PRODUCT_TYPES = ["perfume", "diffuser", "candle", "sample"];
 const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
 
 const invalidate = () => {
-  for (const key of ["/api/products", "/api/product-components", "/api/tooling-costs", "/api/product-cost"]) {
+  for (const key of [
+    "/api/products", "/api/product-components", "/api/tooling-costs", "/api/product-cost",
+    "/api/product-batches", "/api/components", "/api/component-sources", "/api/component-movements",
+    "/api/component-cost-current", "/api/formula-inventory-movements",
+  ]) {
     queryClient.invalidateQueries({ queryKey: [key] });
   }
 };
@@ -25,7 +31,10 @@ export default function ProductsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showBom, setShowBom] = useState(false);
   const [showTooling, setShowTooling] = useState(false);
+  const [showBatch, setShowBatch] = useState(false);
 
+  const { data: batches = [] } = useQuery<any[]>({ queryKey: ["/api/product-batches"] });
+  const { data: fiMovements = [] } = useQuery<any[]>({ queryKey: ["/api/formula-inventory-movements"] });
   const { data: products = [] } = useQuery<any[]>({ queryKey: ["/api/products"] });
   const { data: bom = [] } = useQuery<any[]>({ queryKey: ["/api/product-components"] });
   const { data: components = [] } = useQuery<any[]>({ queryKey: ["/api/components"] });
@@ -55,6 +64,12 @@ export default function ProductsPage() {
   const total = componentsCost + toolingPerUnit;
   const sales = selected?.salesPriceNet != null ? Number(selected.salesPriceNet) : null;
   const margin = sales ? ((sales - total) / sales) * 100 : null;
+
+  const productBatches = selected ? batches.filter((b: any) => b.productId === selected.id) : [];
+  const finishedStock = productBatches.reduce((a: number, b: any) => a + Number(b.stockQty), 0);
+  const stockValue = productBatches.reduce((a: number, b: any) => a + Number(b.stockQty) * Number(b.unitCostEur), 0);
+  const avgStockCost = finishedStock > 0 ? stockValue / finishedStock : null;
+  const lastBatchCost = productBatches.length > 0 ? Number(productBatches[0].unitCostEur) : null;
 
   const removeLine = useMutation({
     mutationFn: (id: string) => deleteJson(`/api/product-components/${id}`),
@@ -93,9 +108,62 @@ export default function ProductsPage() {
                 <h1 className="text-xl font-semibold">{selected.name}</h1>
                 <Badge variant="secondary" className="mt-1">{selected.productType}</Badge>
               </div>
-              <Button size="sm" onClick={() => setShowBom(true)} data-testid="button-add-bom-line">
-                <Plus size={14} className="mr-1" /> Add component
-              </Button>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => setShowBom(true)} data-testid="button-add-bom-line">
+                  <Plus size={14} className="mr-1" /> Add component
+                </Button>
+                <Button size="sm" onClick={() => setShowBatch(true)} disabled={lines.length === 0}
+                  data-testid="button-create-batch">
+                  Create batch
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <Stat label="Finished units in stock" value={fmtNum(finishedStock, 2)} />
+              <Stat label="Real cost per unit (stock avg.)" strong
+                value={avgStockCost != null ? `€ ${fmtNum(avgStockCost, 4)}` : "—"}
+                hint="frozen when each batch was made" />
+              <Stat label="Last batch cost per unit"
+                value={lastBatchCost != null ? `€ ${fmtNum(lastBatchCost, 4)}` : "—"} />
+              <Stat label="Stock value" value={`€ ${fmtNum(stockValue, 2)}`} />
+            </div>
+
+            <h3 className="text-sm font-semibold mb-2">Batches</h3>
+            <div className="bg-card border border-border rounded-lg overflow-x-auto mb-6">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-muted-foreground border-b border-border">
+                    <th className="p-2">Batch</th>
+                    <th className="p-2 text-right">Made</th>
+                    <th className="p-2 text-right">In stock</th>
+                    <th className="p-2 text-right">Components €</th>
+                    <th className="p-2 text-right">Fragrance €</th>
+                    <th className="p-2 text-right">Tooling €</th>
+                    <th className="p-2 text-right">Total €</th>
+                    <th className="p-2 text-right">Per unit €</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productBatches.map((b: any) => (
+                    <tr key={b.id} className="border-b border-border/30">
+                      <td className="p-2">{b.batchLabel}<div className="text-[10px] text-muted-foreground">{String(b.producedAt).slice(0, 10)}</div></td>
+                      <td className="p-2 text-right font-mono">{fmtNum(b.producedQty, 2)}</td>
+                      <td className="p-2 text-right font-mono">{fmtNum(b.stockQty, 2)}</td>
+                      <td className="p-2 text-right font-mono">{fmtNum(b.componentsCostEur, 2)}</td>
+                      <td className="p-2 text-right font-mono">{fmtNum(b.fragranceCostEur, 2)} <span className="text-muted-foreground">({fmtNum(b.fragranceGrams, 2)} g)</span></td>
+                      <td className="p-2 text-right font-mono">{fmtNum(b.toolingCostEur, 2)}</td>
+                      <td className="p-2 text-right font-mono">{fmtNum(b.totalCostEur, 2)}</td>
+                      <td className="p-2 text-right font-mono font-semibold">{fmtNum(b.unitCostEur, 4)}</td>
+                    </tr>
+                  ))}
+                  {productBatches.length === 0 && (
+                    <tr><td colSpan={8} className="p-4 text-center text-muted-foreground">
+                      No batches yet. "Create batch" uses up the components and fragrance and creates finished stock with its real cost.
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
             </div>
 
             <h3 className="text-sm font-semibold mb-2">Bill of materials</h3>
@@ -161,6 +229,7 @@ export default function ProductsPage() {
               </table>
             </div>
 
+            <h3 className="text-sm font-semibold mb-2">Estimate for the next batch (current stock prices)</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Stat label="Components" value={`€ ${fmtNum(componentsCost, 4)}`} />
               <Stat label="Tooling / unit" value={`€ ${fmtNum(toolingPerUnit, 4)}`} />
@@ -186,6 +255,8 @@ export default function ProductsPage() {
       <CreateProductDialog open={showCreate} onOpenChange={setShowCreate} formulas={formulas} onCreated={setSelectedId} />
       {selected && (
         <>
+          <CreateBatchDialog open={showBatch} onOpenChange={setShowBatch} product={selected} lines={lines}
+            compById={compById} fiMovements={fiMovements} />
           <AddBomDialog open={showBom} onOpenChange={setShowBom} product={selected} components={components}
             existing={lineComponentIds} />
           <AddToolingDialog open={showTooling} onOpenChange={setShowTooling}
@@ -346,6 +417,125 @@ function AddToolingDialog({ open, onOpenChange, components }: any) {
           <Button className="w-full" disabled={!valid || mutation.isPending} onClick={() => mutation.mutate()}
             data-testid="button-save-tooling">
             Save
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// grams / millilitres are easier to type than kg / l, so those components are entered in the small unit
+const entryUnit = (unit: string) => (unit === "kg" ? { label: "g", factor: 1000 } : unit === "l" ? { label: "ml", factor: 1000 } : { label: unit, factor: 1 });
+
+function CreateBatchDialog({ open, onOpenChange, product, lines, compById, fiMovements }: any) {
+  const { toast } = useToast();
+  const today = new Date().toISOString().slice(0, 10);
+  const [label, setLabel] = useState("");
+  const [units, setUnits] = useState("");
+  const [fragrance, setFragrance] = useState("");
+  const [deduct, setDeduct] = useState(true);
+  const [override, setOverride] = useState<Record<string, string>>({});
+
+  const unitsNum = num(units) ?? 0;
+
+  // fragrance availability and average cost per gram, same rule as the Formula Inventory page
+  const fi = useMemo(() => {
+    const ms = fiMovements.filter((m: any) => m.formulaId === product.formulaId);
+    let avail = 0, prodGrams = 0, prodCost = 0;
+    for (const m of ms) {
+      avail += Number(m.gramsDelta);
+      if (m.movementType === "production_in") { prodGrams += Number(m.gramsDelta); prodCost += Number(m.totalCost ?? 0); }
+    }
+    return { avail, avgCost: prodGrams > 0 ? prodCost / prodGrams : 0 };
+  }, [fiMovements, product.formulaId]);
+
+  const rows = lines.map((l: any) => {
+    const comp = compById.get(l.componentId);
+    const eu = entryUnit(comp?.unit ?? "pcs");
+    const def = Number(l.quantityPerUnit) * unitsNum * eu.factor;
+    const value = override[l.componentId] ?? (unitsNum > 0 ? String(Math.round(def * 10000) / 10000) : "");
+    return { l, comp, eu, value };
+  });
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.rpc("create_product_batch", {
+        p_product_id: product.id,
+        p_label: label.trim(),
+        p_units: unitsNum,
+        p_fragrance_grams: num(fragrance) ?? 0,
+        p_deduct_fragrance: deduct,
+        p_lines: rows.map((r: any) => ({ component_id: r.l.componentId, qty: (num(r.value) ?? 0) / r.eu.factor })),
+      });
+      if (error) throw new Error(error.message);
+      return data as any;
+    },
+    onSuccess: (b) => {
+      invalidate();
+      onOpenChange(false);
+      setLabel(""); setUnits(""); setFragrance(""); setOverride({});
+      toast({ title: "Batch created", description: `Real cost per unit: € ${fmtNum(b.unit_cost_eur, 4)}` });
+    },
+    onError: (e: any) => toast({ title: "Batch not created", description: e.message, variant: "destructive" }),
+  });
+
+  const fragGrams = num(fragrance) ?? 0;
+  const valid = label.trim() && unitsNum > 0 && (fragGrams === 0 || !!product.formulaId);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-border max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Create batch — {product.name}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <Input placeholder={`Batch label, e.g. ${today}-${product.name.replace(/\s+/g, "-")}-01`} value={label}
+              onChange={e => setLabel(e.target.value)} data-testid="input-batch-label" />
+            <Input placeholder="Units made, e.g. 20" value={units} onChange={e => setUnits(e.target.value)}
+              data-testid="input-batch-units" />
+          </div>
+
+          <div className="border border-border rounded-md p-3 space-y-2">
+            <p className="text-[10px] text-muted-foreground">
+              Actual quantities used for the whole batch (prefilled from the bill of materials, change them if you used more or less).
+              They are taken from the oldest purchases first, so the cost is exact.
+            </p>
+            {rows.map((r: any) => (
+              <div key={r.l.id} className="flex items-center gap-2">
+                <span className="text-xs flex-1">{r.comp?.name ?? "?"}</span>
+                <Input className="h-8 w-28 text-xs text-right" value={r.value}
+                  onChange={e => setOverride({ ...override, [r.l.componentId]: e.target.value })} />
+                <span className="text-xs text-muted-foreground w-8">{r.eu.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {product.formulaId ? (
+            <div className="border border-border rounded-md p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs flex-1">Fragrance (from formula inventory)</span>
+                <Input className="h-8 w-28 text-xs text-right" placeholder="grams" value={fragrance}
+                  onChange={e => setFragrance(e.target.value)} data-testid="input-batch-fragrance" />
+                <span className="text-xs text-muted-foreground w-8">g</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                In inventory: {fmtNum(fi.avail, 2)} g at € {fmtNum(fi.avgCost, 4)}/g
+                {fragGrams > 0 && fi.avgCost > 0 ? ` → € ${fmtNum(fragGrams * fi.avgCost, 2)} for this batch` : ""}
+              </p>
+              <div className="flex items-center gap-2 text-xs">
+                <Switch checked={deduct} onCheckedChange={setDeduct} />
+                <span>Deduct the fragrance from formula inventory</span>
+              </div>
+              {!deduct && <p className="text-[10px] text-muted-foreground">Switch off only if you already recorded this usage there; the cost is counted either way.</p>}
+            </div>
+          ) : (
+            <p className="text-[10px] text-muted-foreground">
+              No formula is linked to this product, so no fragrance cost is counted.
+            </p>
+          )}
+
+          <Button className="w-full" disabled={!valid || mutation.isPending} onClick={() => mutation.mutate()}
+            data-testid="button-save-batch">
+            Create batch
           </Button>
         </div>
       </DialogContent>
