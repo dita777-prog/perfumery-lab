@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { postJson, fmtNum } from "@/lib/api";
+import { postJson, patchJson, fmtNum } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 
 export const COMPONENT_CATEGORIES: Record<string, string> = {
@@ -53,6 +53,7 @@ export default function ComponentsPage() {
   const [showMovement, setShowMovement] = useState(false);
   const [showTooling, setShowTooling] = useState(false);
   const [editSource, setEditSource] = useState<any>(null);
+  const [fxDoc, setFxDoc] = useState<any>(null);
 
   const { data: components = [] } = useQuery<any[]>({ queryKey: ["/api/components"] });
   const { data: costs = [] } = useQuery<any[]>({ queryKey: ["/api/component-cost-current"] });
@@ -200,7 +201,8 @@ export default function ComponentsPage() {
                         <td className="p-2 text-right font-mono">
                           {s.landedUnitCostEur != null
                             ? fmtNum(s.landedUnitCostEur, 4)
-                            : <span className="text-yellow-500">FX missing</span>}
+                            : <button className="text-yellow-500 underline underline-offset-2 hover:text-yellow-400"
+                              onClick={() => doc && setFxDoc(doc)} data-testid={`button-fx-missing-${s.id}`}>FX missing</button>}
                         </td>
                         <td className="p-2 text-right font-mono">{fmtNum(s.stockQty, 2)}</td>
                         <td className="p-2 text-right">
@@ -254,6 +256,7 @@ export default function ComponentsPage() {
         <>
           <AddPurchaseDialog open={showPurchase} onOpenChange={setShowPurchase} component={selected}
             documents={documents} suppliers={suppliers} />
+          <FxDialog doc={fxDoc} onClose={() => setFxDoc(null)} />
           <EditPurchaseDialog source={editSource} onClose={() => setEditSource(null)}
             currency={(docById.get(editSource?.purchaseDocumentId) as any)?.currency ?? "EUR"} />
           <AddToolingDialog open={showTooling} onOpenChange={setShowTooling} component={selected} />
@@ -676,6 +679,40 @@ function EditPurchaseDialog({ source, onClose, currency }: any) {
           </p>
           <Button className="w-full" disabled={!valid || mutation.isPending} onClick={() => mutation.mutate()}
             data-testid="button-save-edit-purchase">
+            Save
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function FxDialog({ doc, onClose }: any) {
+  const { toast } = useToast();
+  const [fx, setFx] = useState("");
+  const mutation = useMutation({
+    mutationFn: () => patchJson(`/api/purchase-documents/${doc.id}`, { fxRateToEur: num(fx) }),
+    onSuccess: () => {
+      for (const key of ["/api/purchase-documents", "/api/component-sources", "/api/component-cost-current"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      setFx(""); onClose();
+      toast({ title: "FX rate saved", description: "EUR cost of the invoice lines has been filled." });
+    },
+    onError: (e: any) => toast({ title: "Could not save FX rate", description: e.message, variant: "destructive" }),
+  });
+  return (
+    <Dialog open={!!doc} onOpenChange={(v) => { if (!v) { setFx(""); onClose(); } }}>
+      <DialogContent className="bg-card border-border">
+        <DialogHeader><DialogTitle>FX rate — invoice {doc?.documentNo}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <Input placeholder={`1 ${doc?.currency} = ? EUR, e.g. 0.0405`} value={fx}
+            onChange={e => setFx(e.target.value)} data-testid="input-fx-rate" />
+          <p className="text-[10px] text-muted-foreground">
+            Applies to all lines of this invoice. The EUR cost is filled once and then stays frozen.
+          </p>
+          <Button className="w-full" disabled={!((num(fx) ?? 0) > 0) || mutation.isPending}
+            onClick={() => mutation.mutate()} data-testid="button-save-fx-rate">
             Save
           </Button>
         </div>
