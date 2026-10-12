@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { patchJson, fmtNum } from "@/lib/api";
+import { fmtNum } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 
 /**
  * Purchase invoices. Freight, VAT and line prices are frozen into the purchase lines when
@@ -25,7 +26,7 @@ export default function InvoicesPage() {
       <h1 className="text-xl font-semibold mb-1">Purchase invoices</h1>
       <p className="text-xs text-muted-foreground mb-4">
         {missing > 0
-          ? `${missing} invoice(s) are waiting for an FX rate to EUR. Enter the rate at the payment date; the EUR cost of the lines is then filled once and stays frozen.`
+          ? `${missing} invoice(s) are waiting for an FX rate to EUR. Enter how many CZK/USD are 1 EUR on the payment date; click a saved rate to correct it.`
           : "All invoices have an FX rate."}
       </p>
       <div className="bg-card border border-border rounded-lg overflow-x-auto">
@@ -41,7 +42,7 @@ export default function InvoicesPage() {
               <th className="p-2 text-right">VAT %</th>
               <th className="p-2">VAT</th>
               <th className="p-2 text-right">Lines</th>
-              <th className="p-2">FX to EUR</th>
+              <th className="p-2">FX (1 EUR =)</th>
             </tr>
           </thead>
           <tbody>
@@ -63,15 +64,19 @@ export default function InvoicesPage() {
 function InvoiceRow({ doc, supplier, lines }: { doc: any; supplier?: string; lines: number }) {
   const { toast } = useToast();
   const [fx, setFx] = useState("");
+  const [editing, setEditing] = useState(false);
 
   const mutation = useMutation({
-    mutationFn: (rate: number) => patchJson(`/api/purchase-documents/${doc.id}`, { fxRateToEur: rate }),
+    mutationFn: async (rate: number) => {
+      const { error } = await supabase.rpc("set_invoice_fx", { p_doc_id: doc.id, p_per_eur: rate });
+      if (error) throw new Error(error.message);
+    },
     onSuccess: () => {
       for (const key of ["/api/purchase-documents", "/api/component-sources", "/api/component-cost-current", "/api/product-cost"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
-      setFx("");
-      toast({ title: "FX rate saved", description: "EUR cost of the invoice lines has been filled." });
+      setFx(""); setEditing(false);
+      toast({ title: "FX rate saved", description: "EUR cost of the invoice lines has been recalculated." });
     },
     onError: (e: any) => toast({ title: "Could not save FX rate", description: e.message, variant: "destructive" }),
   });
@@ -94,11 +99,14 @@ function InvoiceRow({ doc, supplier, lines }: { doc: any; supplier?: string; lin
       </td>
       <td className="p-2 text-right">{lines}</td>
       <td className="p-2">
-        {doc.fxRateToEur != null ? (
-          <span className="font-mono">{fmtNum(doc.fxRateToEur, 6)}</span>
+        {doc.fxRateToEur != null && !editing ? (
+          <button className="font-mono hover:underline" title="Correct the rate"
+            onClick={() => { setFx(String(Math.round(10000 / Number(doc.fxRateToEur)) / 10000)); setEditing(true); }}>
+            {doc.currency === "EUR" ? "—" : `1 EUR = ${fmtNum(1 / Number(doc.fxRateToEur), 4)} ${doc.currency}`}
+          </button>
         ) : (
           <div className="flex gap-1">
-            <Input className="h-7 w-28 text-xs" placeholder="e.g. 0.0405" value={fx}
+            <Input className="h-7 w-28 text-xs" placeholder={`1 EUR = ? ${doc.currency}`} value={fx}
               onChange={e => setFx(e.target.value)} data-testid={`input-fx-${doc.id}`} />
             <Button size="sm" className="h-7" disabled={!(rate > 0) || mutation.isPending}
               onClick={() => mutation.mutate(rate)} data-testid={`button-save-fx-${doc.id}`}>
