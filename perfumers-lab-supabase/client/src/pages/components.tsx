@@ -1,7 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useMemo, useState } from "react";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { postJson, fmtNum } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 
 export const COMPONENT_CATEGORIES: Record<string, string> = {
   glass: "Glass",
@@ -51,6 +52,7 @@ export default function ComponentsPage() {
   const [showPurchase, setShowPurchase] = useState(false);
   const [showMovement, setShowMovement] = useState(false);
   const [showTooling, setShowTooling] = useState(false);
+  const [editSource, setEditSource] = useState<any>(null);
 
   const { data: components = [] } = useQuery<any[]>({ queryKey: ["/api/components"] });
   const { data: costs = [] } = useQuery<any[]>({ queryKey: ["/api/component-cost-current"] });
@@ -172,6 +174,7 @@ export default function ComponentsPage() {
                     <th className="p-2 text-right">Landed</th>
                     <th className="p-2 text-right">Landed €</th>
                     <th className="p-2 text-right">Left</th>
+                    <th className="p-2" />
                   </tr>
                 </thead>
                 <tbody>
@@ -200,11 +203,17 @@ export default function ComponentsPage() {
                             : <span className="text-yellow-500">FX missing</span>}
                         </td>
                         <td className="p-2 text-right font-mono">{fmtNum(s.stockQty, 2)}</td>
+                        <td className="p-2 text-right">
+                          <button className="text-muted-foreground hover:text-foreground" aria-label="Edit purchase"
+                            onClick={() => setEditSource(s)} data-testid={`button-edit-purchase-${s.id}`}>
+                            <Pencil size={12} />
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
                   {selSources.length === 0 && (
-                    <tr><td colSpan={10} className="p-4 text-center text-muted-foreground">No purchases yet.</td></tr>
+                    <tr><td colSpan={11} className="p-4 text-center text-muted-foreground">No purchases yet.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -245,6 +254,8 @@ export default function ComponentsPage() {
         <>
           <AddPurchaseDialog open={showPurchase} onOpenChange={setShowPurchase} component={selected}
             documents={documents} suppliers={suppliers} />
+          <EditPurchaseDialog source={editSource} onClose={() => setEditSource(null)}
+            currency={(docById.get(editSource?.purchaseDocumentId) as any)?.currency ?? "EUR"} />
           <AddToolingDialog open={showTooling} onOpenChange={setShowTooling} component={selected} />
           <MovementDialog open={showMovement} onOpenChange={setShowMovement} component={selected}
             sources={selSources} docById={docById} />
@@ -590,6 +601,81 @@ function AddToolingDialog({ open, onOpenChange, component }: any) {
           </div>
           <Button className="w-full" disabled={!valid || mutation.isPending} onClick={() => mutation.mutate()}
             data-testid="button-save-tooling">
+            Save
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditPurchaseDialog({ source, onClose, currency }: any) {
+  const { toast } = useToast();
+  const [price, setPrice] = useState("");
+  const [qty, setQty] = useState("");
+  const [vat, setVat] = useState("");
+  const [freight, setFreight] = useState("");
+  const [setup, setSetup] = useState("");
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+
+  if (source && loadedId !== source.id) {
+    setLoadedId(source.id);
+    setPrice(String(Number(source.unitPriceNet)));
+    setQty(String(Number(source.purchaseQuantity)));
+    setVat(String(Number(source.vatRate)));
+    setFreight(String(Number(source.freightShare)));
+    setSetup(String(Number(source.setupCharge)));
+  }
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.rpc("update_component_purchase", {
+        p_source_id: source.id,
+        p_unit_price_net: num(price),
+        p_purchase_quantity: num(qty),
+        p_vat_rate: num(vat),
+        p_freight_share: num(freight),
+        p_setup_charge: num(setup),
+      });
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      for (const key of ["/api/component-sources", "/api/components", "/api/component-cost-current"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      setLoadedId(null);
+      onClose();
+      toast({ title: "Purchase updated", description: "Landed cost recalculated. Finished batches already made keep their cost." });
+    },
+    onError: (e: any) => toast({ title: "Could not update purchase", description: e.message, variant: "destructive" }),
+  });
+
+  const valid = num(price) != null && num(price)! >= 0 && (num(qty) ?? 0) > 0;
+  const field = (label: string, value: string, set: (v: string) => void, testid: string) => (
+    <label className="text-[10px] text-muted-foreground">
+      {label}
+      <Input className="mt-1 text-sm text-foreground" value={value} onChange={e => set(e.target.value)} data-testid={testid} />
+    </label>
+  );
+
+  return (
+    <Dialog open={!!source} onOpenChange={(v) => { if (!v) { setLoadedId(null); onClose(); } }}>
+      <DialogContent className="bg-card border-border">
+        <DialogHeader><DialogTitle>Edit purchase</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            {field(`Unit price net (${currency})`, price, setPrice, "input-edit-price")}
+            {field("Quantity purchased", qty, setQty, "input-edit-qty")}
+            {field("VAT %", vat, setVat, "input-edit-vat")}
+            {field(`Freight per unit (${currency})`, freight, setFreight, "input-edit-freight")}
+            {field(`Setup charge, whole purchase (${currency})`, setup, setSetup, "input-edit-setup")}
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Landed cost is recalculated. Changing the quantity moves the stock by the same amount. Batches of finished products
+            that were already created keep the cost they had.
+          </p>
+          <Button className="w-full" disabled={!valid || mutation.isPending} onClick={() => mutation.mutate()}
+            data-testid="button-save-edit-purchase">
             Save
           </Button>
         </div>
