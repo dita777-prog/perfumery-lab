@@ -50,12 +50,14 @@ export default function ComponentsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showPurchase, setShowPurchase] = useState(false);
   const [showMovement, setShowMovement] = useState(false);
+  const [showTooling, setShowTooling] = useState(false);
 
   const { data: components = [] } = useQuery<any[]>({ queryKey: ["/api/components"] });
   const { data: costs = [] } = useQuery<any[]>({ queryKey: ["/api/component-cost-current"] });
   const { data: sources = [] } = useQuery<any[]>({ queryKey: ["/api/component-sources"] });
   const { data: documents = [] } = useQuery<any[]>({ queryKey: ["/api/purchase-documents"] });
   const { data: suppliers = [] } = useQuery<any[]>({ queryKey: ["/api/suppliers"] });
+  const { data: tooling = [] } = useQuery<any[]>({ queryKey: ["/api/tooling-costs"] });
 
   const costById = useMemo(() => new Map(costs.map((c: any) => [c.componentId, c])), [costs]);
   const docById = useMemo(() => new Map(documents.map((d: any) => [d.id, d])), [documents]);
@@ -69,6 +71,7 @@ export default function ComponentsPage() {
 
   const selected = components.find((c: any) => c.id === selectedId);
   const selCost = selected ? costById.get(selected.id) : null;
+  const selTooling = selected ? tooling.filter((t: any) => t.componentId === selected.id) : [];
   const selSources = selected ? sources.filter((s: any) => s.componentId === selected.id) : [];
 
   return (
@@ -134,6 +137,9 @@ export default function ComponentsPage() {
                 <Button size="sm" variant="outline" onClick={() => setShowMovement(true)}
                   disabled={selSources.length === 0} data-testid="button-component-movement">
                   Usage / correction
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setShowTooling(true)} data-testid="button-add-tooling">
+                  Add tooling
                 </Button>
                 <Button size="sm" onClick={() => setShowPurchase(true)} data-testid="button-add-purchase">
                   <Plus size={14} className="mr-1" /> Add purchase
@@ -207,6 +213,25 @@ export default function ComponentsPage() {
               Landed cost = net price + allocated freight + per-unit setup (+ VAT when it is not recoverable).
               It is frozen when the purchase is saved and never recalculated.
             </p>
+            {selTooling.length > 0 && (
+              <>
+                <h3 className="text-sm font-semibold mt-6 mb-2">One-off tooling (amortised per finished unit, not in landed cost)</h3>
+                <div className="bg-card border border-border rounded-lg overflow-x-auto">
+                  <table className="w-full text-xs"><tbody>
+                    {selTooling.map((t: any) => (
+                      <tr key={t.id} className="border-b border-border/30">
+                        <td className="p-2">{t.description}</td>
+                        <td className="p-2 text-right font-mono">{fmtNum(t.cost)} {t.currency}</td>
+                        <td className="p-2 text-right text-muted-foreground">over {t.amortiseOverUnits} units</td>
+                        <td className="p-2 text-right font-mono">
+                          € {fmtNum((Number(t.cost) * Number(t.fxRateToEur)) / Number(t.amortiseOverUnits), 4)} / unit
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody></table>
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
@@ -220,6 +245,7 @@ export default function ComponentsPage() {
         <>
           <AddPurchaseDialog open={showPurchase} onOpenChange={setShowPurchase} component={selected}
             documents={documents} suppliers={suppliers} />
+          <AddToolingDialog open={showTooling} onOpenChange={setShowTooling} component={selected} />
           <MovementDialog open={showMovement} onOpenChange={setShowMovement} component={selected}
             sources={selSources} docById={docById} />
         </>
@@ -513,6 +539,57 @@ function MovementDialog({ open, onOpenChange, component, sources, docById }: any
           <Input placeholder="Note" value={notes} onChange={e => setNotes(e.target.value)} />
           <Button className="w-full" disabled={!sourceId || !num(qty) || mutation.isPending}
             onClick={() => mutation.mutate()} data-testid="button-save-movement">
+            Save
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AddToolingDialog({ open, onOpenChange, component }: any) {
+  const { toast } = useToast();
+  const [description, setDescription] = useState("");
+  const [cost, setCost] = useState("");
+  const [currency, setCurrency] = useState("CZK");
+  const [fx, setFx] = useState("");
+  const [units, setUnits] = useState("");
+
+  const mutation = useMutation({
+    mutationFn: () => postJson("/api/tooling-costs", {
+      componentId: component.id, description: description.trim(), cost: num(cost), currency,
+      fxRateToEur: currency === "EUR" ? 1 : num(fx),
+      amortiseOverUnits: Math.round(num(units) ?? 0),
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tooling-costs"] });
+      onOpenChange(false); setDescription(""); setCost(""); setUnits(""); setFx("");
+    },
+    onError: (e: any) => toast({ title: "Could not save tooling", description: e.message, variant: "destructive" }),
+  });
+
+  const valid = description.trim() && num(cost) != null && (num(units) ?? 0) > 0 &&
+    (currency === "EUR" || (num(fx) ?? 0) > 0);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-card border-border">
+        <DialogHeader><DialogTitle>One-off tooling — {component.name}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <Input placeholder="Description, e.g. cutting die" value={description} onChange={e => setDescription(e.target.value)} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input placeholder="Cost" value={cost} onChange={e => setCost(e.target.value)} />
+            <Select value={currency} onValueChange={setCurrency}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{["CZK", "EUR", "USD"].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+            </Select>
+            {currency !== "EUR" && (
+              <Input className="col-span-2" placeholder={`FX: 1 ${currency} = ? EUR`} value={fx} onChange={e => setFx(e.target.value)} />
+            )}
+            <Input className="col-span-2" placeholder="Expected lifetime volume (units) to spread it over" value={units} onChange={e => setUnits(e.target.value)} />
+          </div>
+          <Button className="w-full" disabled={!valid || mutation.isPending} onClick={() => mutation.mutate()}
+            data-testid="button-save-tooling">
             Save
           </Button>
         </div>

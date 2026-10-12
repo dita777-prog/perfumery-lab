@@ -10,7 +10,7 @@ import { supabase } from "./lib/supabase";
 import {
   FlaskConical, Package, Users, TestTube, Lightbulb,
   BarChart3, Settings, Search, Menu, X, Boxes, Archive, Droplet, Heart,
-  Layers, ReceiptText, Tag, LogOut
+  Layers, ReceiptText, LogOut
 } from "lucide-react";
 import MaterialsPage from "./pages/materials";
 import WishlistPage from "./pages/wishlist";
@@ -25,7 +25,6 @@ import SearchPage from "./pages/search";
 import ArchivePage from "./pages/archive";
 import ComponentsPage from "./pages/components";
 import InvoicesPage from "./pages/invoices";
-import ProductsPage from "./pages/products";
 import LoginPage from "./pages/login";
 import NotFound from "./pages/not-found";
 
@@ -44,7 +43,6 @@ function AppLayout() {
     { href: "/formula-inventory", icon: Droplet, label: "Formula Inventory" },
     { href: "/components", icon: Layers, label: "Components" },
     { href: "/invoices", icon: ReceiptText, label: "Invoices" },
-    { href: "/products", icon: Tag, label: "Products" },
     { href: "/search", icon: Search, label: "Search" },
     { href: "/archive", icon: Archive, label: "Archive" },
     { href: "/settings", icon: Settings, label: "Settings" },
@@ -117,7 +115,6 @@ function AppLayout() {
             <Route path="/formula-inventory" component={FormulaInventoryPage} />
             <Route path="/components" component={ComponentsPage} />
             <Route path="/invoices" component={InvoicesPage} />
-            <Route path="/products" component={ProductsPage} />
             <Route path="/search" component={SearchPage} />
             <Route path="/archive" component={ArchivePage} />
             <Route path="/settings" component={SettingsPage} />
