@@ -192,12 +192,13 @@ export function CreateProductDialog({
               Enter the amounts for ONE piece. The app multiplies them by the number of units below
               and takes the components from the oldest purchases first, so the cost is exact.
             </p>
+            <p className="text-[10px] text-muted-foreground">Type into the framed box: amount for 1 piece (wax in g, vessel/wick in pcs).</p>
             {rows.map((r, i) => {
               const eu = entryUnit((compById.get(r.componentId) as any)?.unit ?? "pcs");
               return (
                 <div key={r.componentId} className="flex items-center gap-2">
                   <span className="text-xs flex-1">{(compById.get(r.componentId) as any)?.name ?? "?"}</span>
-                  <Input className="h-8 w-24 text-xs text-right" value={r.perUnit} placeholder="per 1 pc"
+                  <Input className="h-8 w-24 text-xs text-right border-primary/60 bg-background" inputMode="decimal" value={r.perUnit} placeholder="0"
                     onChange={e => setRows(rows.map((x, j) => (j === i ? { ...x, perUnit: e.target.value } : x)))} />
                   <span className="text-xs text-muted-foreground w-8">{eu.label}</span>
                   <span className="text-[10px] text-muted-foreground w-24 text-right">
@@ -218,7 +219,7 @@ export function CreateProductDialog({
           <div className="border border-border rounded-md p-3 space-y-2">
             <div className="flex items-center gap-2">
               <span className="text-xs flex-1">Fragrance per 1 pc (from this entry)</span>
-              <Input className="h-8 w-24 text-xs text-right" placeholder="per 1 pc" value={fragrance}
+              <Input className="h-8 w-24 text-xs text-right border-primary/60 bg-background" inputMode="decimal" placeholder="0" value={fragrance}
                 onChange={e => setFragrance(e.target.value)} data-testid="input-product-fragrance" />
               <span className="text-xs text-muted-foreground w-8">g</span>
               <span className="text-[10px] text-muted-foreground w-24 text-right">
