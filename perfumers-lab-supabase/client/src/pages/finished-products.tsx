@@ -31,7 +31,8 @@ const invalidate = () => {
   }
 };
 
-type Row = { componentId: string; perUnit: string | null; total: string };
+type Row = { componentId: string; perUnit: string };
+const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
 /**
  * "Create product": assembles finished products from the components and the fragrance of ONE
@@ -49,13 +50,14 @@ export function CreateProductDialog({
   const { data: bom = [] } = useQuery<any[]>({ queryKey: ["/api/product-components"] });
   const { data: components = [] } = useQuery<any[]>({ queryKey: ["/api/components"] });
   const { data: lineList = [] } = useQuery<any[]>({ queryKey: ["/api/component-lines"] });
+  const { data: batches = [] } = useQuery<any[]>({ queryKey: ["/api/product-batches"] });
 
   const [productId, setProductId] = useState("new");
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("candle");
   const [label, setLabel] = useState("");
   const [units, setUnits] = useState("");
-  const [fragrance, setFragrance] = useState("");
+  const [fragrance, setFragrance] = useState(""); // grams for ONE unit
   const [rows, setRows] = useState<Row[]>([]);
   const [saveTemplate, setSaveTemplate] = useState(true);
 
@@ -66,11 +68,8 @@ export function CreateProductDialog({
   const productType = (productId === "new" ? newType : product?.productType) ?? "";
   const preferredLine = lineList.find((l: any) => l.name.toLowerCase() === String(productType).toLowerCase())?.name ?? null;
 
-  const valueOf = (r: Row) => {
-    if (r.total !== "") return r.total;
-    if (r.perUnit != null && unitsNum > 0) return String(Math.round(Number(r.perUnit) * unitsNum * 10000) / 10000);
-    return "";
-  };
+  // amount for the whole batch = amount for one unit x units made (entry units)
+  const totalOf = (r: Row) => r4((num(r.perUnit) ?? 0) * unitsNum);
 
   const reset = () => {
     setProductId("new"); setNewName(""); setLabel(""); setUnits(""); setFragrance(""); setRows([]);
@@ -78,15 +77,19 @@ export function CreateProductDialog({
 
   const pickProduct = (id: string) => {
     setProductId(id);
-    if (id === "new") { setRows([]); return; }
+    if (id === "new") { setRows([]); setFragrance(""); return; }
+    // fragrance per unit from the latest batch of this product
+    const lb = batches.find((b: any) => b.productId === id && Number(b.units) > 0 && Number(b.fragranceGrams) > 0);
+    setFragrance(lb ? String(r4(Number(lb.fragranceGrams) / Number(lb.units))) : "");
     // prefill from the saved bill of materials (quantities per unit, shown in g / ml where useful)
     setRows(bom.filter((b: any) => b.productId === id).map((b: any) => {
       const eu = entryUnit((compById.get(b.componentId) as any)?.unit ?? "pcs");
-      return { componentId: b.componentId, perUnit: String(Number(b.quantityPerUnit) * eu.factor), total: "" };
+      return { componentId: b.componentId, perUnit: String(r4(Number(b.quantityPerUnit) * eu.factor)) };
     }));
   };
 
-  const fragGrams = num(fragrance) ?? 0;
+  const fragPerUnit = num(fragrance) ?? 0;
+  const fragGrams = r4(fragPerUnit * unitsNum);
   const avail = agg?.availableGrams ?? 0;
   const avgCost = agg?.avgCostPerGram ?? 0;
 
@@ -105,7 +108,7 @@ export function CreateProductDialog({
       const lines = rows
         .map(r => {
           const eu = entryUnit((compById.get(r.componentId) as any)?.unit ?? "pcs");
-          return { component_id: r.componentId, qty: (num(valueOf(r)) ?? 0) / eu.factor, factor: eu.factor };
+          return { component_id: r.componentId, qty: totalOf(r) / eu.factor, factor: eu.factor };
         })
         .filter(l => l.qty > 0);
       const { data, error } = await supabase.rpc("create_product_batch", {
@@ -154,7 +157,7 @@ export function CreateProductDialog({
   const valid =
     !!agg && label.trim() && unitsNum > 0 && fragGrams >= 0 && fragGrams <= avail + 1e-9 &&
     (productId !== "new" || newName.trim()) && rows.length > 0 &&
-    rows.every(r => (num(valueOf(r)) ?? 0) > 0);
+    rows.every(r => (num(r.perUnit) ?? 0) > 0);
 
   const usedIds = new Set(rows.map(r => r.componentId));
   const today = new Date().toISOString().slice(0, 10);
@@ -181,43 +184,25 @@ export function CreateProductDialog({
               </Select>
             </div>
           )}
-          <div className="grid grid-cols-2 gap-2">
-            <Input placeholder={`Label, e.g. ${today}-RoseNoir-01`} value={label}
-              onChange={e => setLabel(e.target.value)} data-testid="input-product-label" />
-            <Input placeholder="Units made, e.g. 20" value={units}
-              onChange={e => setUnits(e.target.value)} data-testid="input-product-units" />
-          </div>
-
-          <div className="border border-border rounded-md p-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs flex-1">Fragrance from this entry</span>
-              <Input className="h-8 w-28 text-xs text-right" placeholder="grams" value={fragrance}
-                onChange={e => setFragrance(e.target.value)} data-testid="input-product-fragrance" />
-              <span className="text-xs text-muted-foreground w-8">g</span>
-            </div>
-            <p className="text-[10px] text-muted-foreground">
-              Available: {fmtNum(avail, 4)} g at € {fmtNum(avgCost, 4)}/g
-              {fragGrams > 0 && avgCost > 0 ? ` → € ${fmtNum(fragGrams * avgCost, 2)} for this batch` : ""}
-              . The amount is deducted from this Formula Inventory entry.
-            </p>
-            {fragGrams > avail + 1e-9 && (
-              <p className="text-[11px] text-red-400">More than is available in this entry.</p>
-            )}
-          </div>
+          <Input placeholder={`Label, e.g. ${today}-RoseNoir-01`} value={label}
+            onChange={e => setLabel(e.target.value)} data-testid="input-product-label" />
 
           <div className="border border-border rounded-md p-3 space-y-2">
             <p className="text-[10px] text-muted-foreground">
-              Quantities used for the whole batch (e.g. 210 g wax, 20 vessels, 20 wicks). Taken from the oldest purchases first,
-              so the cost is exact.
+              Enter the amounts for ONE piece. The app multiplies them by the number of units below
+              and takes the components from the oldest purchases first, so the cost is exact.
             </p>
             {rows.map((r, i) => {
               const eu = entryUnit((compById.get(r.componentId) as any)?.unit ?? "pcs");
               return (
                 <div key={r.componentId} className="flex items-center gap-2">
                   <span className="text-xs flex-1">{(compById.get(r.componentId) as any)?.name ?? "?"}</span>
-                  <Input className="h-8 w-28 text-xs text-right" value={valueOf(r)}
-                    onChange={e => setRows(rows.map((x, j) => (j === i ? { ...x, total: e.target.value } : x)))} />
+                  <Input className="h-8 w-24 text-xs text-right" value={r.perUnit} placeholder="per 1 pc"
+                    onChange={e => setRows(rows.map((x, j) => (j === i ? { ...x, perUnit: e.target.value } : x)))} />
                   <span className="text-xs text-muted-foreground w-8">{eu.label}</span>
+                  <span className="text-[10px] text-muted-foreground w-24 text-right">
+                    {unitsNum > 0 && (num(r.perUnit) ?? 0) > 0 ? `= ${fmtNum(totalOf(r), 4)} ${eu.label}` : ""}
+                  </span>
                   <button className="text-muted-foreground hover:text-destructive" aria-label="Remove"
                     onClick={() => setRows(rows.filter((_, j) => j !== i))}>
                     <Trash2 size={12} />
@@ -227,7 +212,34 @@ export function CreateProductDialog({
             })}
             <ComponentPicker components={components.filter((c: any) => !usedIds.has(c.id))} lines={lineList}
               preferredLine={preferredLine}
-              onPick={(id: string) => setRows([...rows, { componentId: id, perUnit: null, total: "" }])} />
+              onPick={(id: string) => setRows([...rows, { componentId: id, perUnit: "" }])} />
+          </div>
+
+          <div className="border border-border rounded-md p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs flex-1">Fragrance per 1 pc (from this entry)</span>
+              <Input className="h-8 w-24 text-xs text-right" placeholder="per 1 pc" value={fragrance}
+                onChange={e => setFragrance(e.target.value)} data-testid="input-product-fragrance" />
+              <span className="text-xs text-muted-foreground w-8">g</span>
+              <span className="text-[10px] text-muted-foreground w-24 text-right">
+                {unitsNum > 0 && fragPerUnit > 0 ? `= ${fmtNum(fragGrams, 4)} g` : ""}
+              </span>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Available: {fmtNum(avail, 4)} g at € {fmtNum(avgCost, 4)}/g
+              {fragPerUnit > 0 && avgCost > 0 ? ` → € ${fmtNum(fragPerUnit * avgCost, 4)} fragrance per pc` : ""}
+              . The total is deducted from this Formula Inventory entry.
+            </p>
+            {fragGrams > avail + 1e-9 && (
+              <p className="text-[11px] text-red-400">More than is available in this entry.</p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs flex-1 font-medium">Units made</span>
+            <Input className="h-8 w-28 text-xs text-right" placeholder="e.g. 20" value={units}
+              onChange={e => setUnits(e.target.value)} data-testid="input-product-units" />
+            <span className="text-xs text-muted-foreground w-8">pcs</span>
           </div>
 
           <div className="flex items-center gap-2 text-xs">
