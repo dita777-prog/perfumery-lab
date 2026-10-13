@@ -833,7 +833,7 @@ updateStatusMut.mutate({ status: newStatus });
       </div>
 
       {/* Dialogs */}
-      <ScaleDialog open={showScale} onOpenChange={setShowScale} formula={formula} ingredients={ingredients} materials={materials} dilutions={dilutions} allFormulas={allFormulas} />
+      <ScaleDialog open={showScale} onOpenChange={setShowScale} formula={formula} ingredients={ingredients} materials={materials} materialSources={materialSources} dilutions={dilutions} allFormulas={allFormulas} />
       <DuplicateDialog
         open={showDupDialog}
         onOpenChange={setShowDupDialog}
@@ -1366,7 +1366,7 @@ function CreateFormulaDialog({ open, onOpenChange, categories, onCreated }: any)
 }
 
 // ─── Scale Dialog (all 4 methods in one panel) ─────────────────
-function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilutions, allFormulas }: any) {
+function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, materialSources, dilutions, allFormulas }: any) {
   const { toast } = useToast();
   const [totalWeightVal, setTotalWeightVal] = useState("");
   const [factorVal, setFactorVal] = useState("");
@@ -1534,7 +1534,7 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
                 />
               </div>
             </div>
-            {activeMethod === "total_weight" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} />}
+            {activeMethod === "total_weight" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} materialSources={materialSources} />}
           </div>
 
           {/* 2. Scale by scaling factor */}
@@ -1557,7 +1557,7 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
                 />
               </div>
             </div>
-            {activeMethod === "factor" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} />}
+            {activeMethod === "factor" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} materialSources={materialSources} />}
           </div>
 
           {/* 3. Scale to absolute percentage */}
@@ -1589,7 +1589,7 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
                 />
               </div>
             </div>
-            {activeMethod === "abs_percent" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} />}
+            {activeMethod === "abs_percent" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} materialSources={materialSources} />}
           </div>
 
           {/* 4. Scale percentage by scaling factor */}
@@ -1617,7 +1617,7 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
                 />
               </div>
             </div>
-            {activeMethod === "pct_factor" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} />}
+            {activeMethod === "pct_factor" && preview.length > 0 && <ScalePreviewTable preview={preview} getIngredientName={getIngredientName} materialSources={materialSources} />}
           </div>
 
           {/* Note + Buttons */}
@@ -1640,29 +1640,57 @@ function ScaleDialog({ open, onOpenChange, formula, ingredients, materials, dilu
   );
 }
 
-function ScalePreviewTable({ preview, getIngredientName }: { preview: any[]; getIngredientName: (ing: any) => string }) {
+function ScalePreviewTable({ preview, getIngredientName, materialSources }: { preview: any[]; getIngredientName: (ing: any) => string; materialSources?: any[] }) {
+  const stockOf = (materialId: string) =>
+    (materialSources || [])
+      .filter((s: any) => s.materialId === materialId)
+      .reduce((sum: number, s: any) => sum + (parseFloat(s.stockGrams || "0") || 0), 0);
+  // Stock is compared with the weighed mass that would be taken from it (same rule as the Stock column).
+  const info = (p: any) => {
+    if (!p.materialId) return null;
+    const stock = stockOf(p.materialId);
+    const needed = stockDeductionGrams(p);
+    const status = needed <= 0 ? "ok" : stock < needed ? "insufficient" : stock < needed * 1.15 ? "low" : "ok";
+    return { stock, needed, status };
+  };
+  const rows = preview.map(p => ({ p, i: info(p) }));
+  const short = rows.filter(r => r.i?.status === "insufficient");
   return (
-    <div className="bg-secondary/50 rounded p-2 mt-3 max-h-48 overflow-y-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-muted-foreground">
-            <th className="w-6"></th>
-            <th className="text-left font-normal"></th>
-            <th className="text-right font-normal py-1">Weigh</th>
-            <th className="text-right font-normal py-1 pl-2">Neat</th>
-          </tr>
-        </thead>
-        <tbody>
-          {preview.map((p: any, i: number) => (
-            <tr key={p.id || i} className="border-b border-border/30">
-              <td className="py-1 text-muted-foreground w-6">{i + 1}</td>
-              <td className="py-1 truncate">{getIngredientName(p)}</td>
-              <td className="py-1 text-right font-mono">{fmtGrams(weighedGramsOf(p))}</td>
-              <td className="py-1 pl-2 text-right font-mono text-muted-foreground">{fmtGrams(neatGramsOf(p))}</td>
+    <div className="bg-secondary/50 rounded p-2 mt-3">
+      <div className="max-h-48 overflow-y-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-muted-foreground">
+              <th className="w-6"></th>
+              <th className="text-left font-normal"></th>
+              <th className="text-right font-normal py-1">Weigh</th>
+              <th className="text-right font-normal py-1 pl-2">In stock</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map(({ p, i: inf }, idx: number) => {
+              const color = !inf ? "text-muted-foreground" : inf.status === "insufficient" ? "text-red-500" : inf.status === "low" ? "text-amber-500" : "text-emerald-500";
+              return (
+                <tr key={p.id || idx} className="border-b border-border/30">
+                  <td className="py-1 text-muted-foreground w-6">{idx + 1}</td>
+                  <td className="py-1 truncate">{getIngredientName(p)}</td>
+                  <td className="py-1 text-right font-mono">{fmtGrams(weighedGramsOf(p))}</td>
+                  <td className={`py-1 pl-2 text-right font-mono ${color}`}
+                    title={inf ? `Needed: ${inf.needed.toFixed(3)} g · In stock: ${inf.stock.toFixed(3)} g` : undefined}>
+                    {inf ? fmtGrams(inf.stock) : "—"}
+                    {inf?.status === "insufficient" && <span className="ml-1">(−{fmtGrams(inf.needed - inf.stock)})</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className={`text-[11px] mt-2 ${short.length > 0 ? "text-red-500" : "text-emerald-500"}`}>
+        {short.length > 0
+          ? `Not enough stock for ${short.length} material${short.length > 1 ? "s" : ""}: ${short.map(r => getIngredientName(r.p)).join(", ")}`
+          : "Enough stock for all materials"}
+      </p>
     </div>
   );
 }

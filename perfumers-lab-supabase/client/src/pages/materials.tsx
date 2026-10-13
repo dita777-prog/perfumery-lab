@@ -470,7 +470,15 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
   const handleSupplierSelect = (supplierId: string) => {
     const alreadyLinked = sources.some((s: any) => s.supplierId === supplierId);
     if (!alreadyLinked) {
-      createSourceMut.mutate({ materialId: material.id, supplierId, stockGrams: "0" });
+      // Put the supplier on the existing record that has the price/quantity/stock (one without a supplier yet),
+      // instead of creating a second, empty record.
+      const unassigned = sources.find((s: any) => !s.supplierId);
+      if (unassigned) {
+        updateSourceMut.mutate({ id: unassigned.id, data: { supplierId } });
+        toast({ title: "Supplier linked" });
+      } else {
+        createSourceMut.mutate({ materialId: material.id, supplierId, stockGrams: "0" });
+      }
     }
     setSupplierOpen(false);
   };
@@ -914,7 +922,11 @@ function SuppliersTab({ materialId, sources, suppliers }: any) {
     <div>
       <div className="flex justify-between items-center mb-3">
         <p className="text-xs text-muted-foreground">Supplier records, pricing, and stock</p>
-        <Button size="sm" onClick={() => setShowAdd(true)} data-testid="button-add-supplier-record">
+        <Button size="sm" data-testid="button-add-supplier-record" onClick={() => {
+          // a record that only has a supplier (no price/stock yet) is completed instead of adding a second one
+          const stub = sources.find((s: any) => s.supplierId && !s.purchasePrice && !s.pricePerGram && !(parseFloat(s.stockGrams || "0") > 0));
+          if (stub) setEditId(stub.id); else setShowAdd(true);
+        }}>
           <Plus size={14} className="mr-1" /> Add Supplier
         </Button>
       </div>
