@@ -68,6 +68,9 @@ export function CreateProductDialog({
   const [rows, setRows] = useState<Row[]>([]);
   const [mats, setMats] = useState<Row[]>([]); // raw materials from the Materials stock (e.g. EtOH), grams per 1 pc
   const { data: materials = [] } = useQuery<any[]>({ queryKey: ["/api/materials"] });
+  const { data: compSources = [] } = useQuery<any[]>({ queryKey: ["/api/component-sources"] });
+  const { data: matSources = [] } = useQuery<any[]>({ queryKey: ["/api/material-sources"] });
+  const { data: tooling = [] } = useQuery<any[]>({ queryKey: ["/api/tooling-costs"] });
   const [saveTemplate, setSaveTemplate] = useState(true);
 
   const matById = useMemo(() => new Map(materials.map((m: any) => [m.id, m])), [materials]);
@@ -176,6 +179,52 @@ export function CreateProductDialog({
     !!agg && label.trim() && unitsNum > 0 && fragGrams >= 0 && fragGrams <= avail + 1e-9 &&
     (productId !== "new" || newName.trim()) && (rows.length > 0 || mats.length > 0) &&
     rows.every(r => (num(r.perUnit) ?? 0) > 0) && mats.every(m => (num(m.perUnit) ?? 0) > 0);
+
+  // live cost preview: same rule as the database (oldest purchases first), so the figure matches the saved one
+  const preview = useMemo(() => {
+    const n = unitsNum > 0 ? unitsNum : 1;
+    const missing: string[] = [];
+    const fifo = <T,>(list: T[], qty: number, stockOf: (x: T) => number, costOf: (x: T) => number | null, name: string) => {
+      let need = qty, cost = 0;
+      for (const x of list) {
+        if (need <= 0) break;
+        const st = stockOf(x);
+        if (st <= 0) continue;
+        const c = costOf(x);
+        const take = Math.min(st, need);
+        if (c == null) { if (!missing.includes(name)) missing.push(name); } else cost += take * c;
+        need -= take;
+      }
+      if (need > 1e-9 && !missing.includes(`${name} (not enough stock)`)) missing.push(`${name} (not enough stock)`);
+      return cost;
+    };
+    const byDate = (a: any, b: any) =>
+      String(a.purchaseDate ?? "").localeCompare(String(b.purchaseDate ?? "")) ||
+      String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? ""));
+    let comp = 0;
+    for (const r of rows) {
+      const c: any = compById.get(r.componentId);
+      const eu = entryUnit(c?.unit ?? "pcs", c);
+      const qty = ((num(r.perUnit) ?? 0) * n) / eu.factor;
+      if (qty <= 0) continue;
+      const src = compSources.filter((x: any) => x.componentId === r.componentId).sort(byDate);
+      comp += fifo(src, qty, (x: any) => Number(x.stockQty), (x: any) => (x.landedUnitCostEur == null ? null : Number(x.landedUnitCostEur)), c?.name ?? "?");
+    }
+    let mat = 0;
+    for (const m of mats) {
+      const qty = (num(m.perUnit) ?? 0) * n;
+      if (qty <= 0) continue;
+      const src = matSources.filter((x: any) => x.materialId === m.componentId).sort(byDate);
+      mat += fifo(src, qty, (x: any) => Number(x.stockGrams), (x: any) => (x.pricePerGram == null ? null : Number(x.pricePerGram)), (matById.get(m.componentId) as any)?.name ?? "?");
+    }
+    const frag = fragPerUnit * n * avgCost;
+    const compIds = new Set(rows.map(r => r.componentId));
+    const tool = tooling
+      .filter((t: any) => compIds.has(t.componentId))
+      .reduce((a: number, t: any) => a + (Number(t.cost) * Number(t.fxRateToEur)) / Number(t.amortiseOverUnits), 0) * n;
+    const total = comp + mat + frag + tool;
+    return { comp, mat, frag, tool, total, perUnit: total / n, missing, n };
+  }, [rows, mats, compSources, matSources, tooling, compById, matById, unitsNum, fragPerUnit, avgCost]);
 
   const usedIds = new Set(rows.map(r => r.componentId));
   const today = new Date().toISOString().slice(0, 10);
@@ -292,6 +341,23 @@ export function CreateProductDialog({
             <Switch checked={saveTemplate} onCheckedChange={setSaveTemplate} />
             <span>Remember this component list for the next "Create product"</span>
           </div>
+
+          {(rows.length > 0 || mats.length > 0) && (
+            <div className="border border-primary/40 rounded-md p-3 space-y-1 bg-secondary/20" data-testid="cost-preview">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs font-medium">Cost per 1 pc</span>
+                <span className="font-mono text-base font-semibold">€ {fmtNum(preview.perUnit, 4)}</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground font-mono">
+                components € {fmtNum(preview.comp / preview.n, 4)} · materials € {fmtNum(preview.mat / preview.n, 4)} ·
+                fragrance € {fmtNum(preview.frag / preview.n, 4)} · tooling € {fmtNum(preview.tool / preview.n, 4)}
+                {unitsNum > 0 ? ` · batch total € ${fmtNum(preview.total, 2)}` : " · enter units made for the batch total"}
+              </p>
+              {preview.missing.length > 0 && (
+                <p className="text-[11px] text-red-400">Not fully costed: {preview.missing.join(", ")}</p>
+              )}
+            </div>
+          )}
 
           <Button className="w-full" disabled={!valid || mutation.isPending} onClick={() => mutation.mutate()}
             data-testid="button-save-product">
