@@ -134,6 +134,7 @@ export default function ComponentsPage() {
   const q = search.trim().toLowerCase();
   const filtered = components.filter((c: any) =>
     !q || c.name.toLowerCase().includes(q) ||
+    (c.altNames ?? []).some((n: string) => n.toLowerCase().includes(q)) ||
     (COMPONENT_CATEGORIES[c.category] ?? "").toLowerCase().includes(q) ||
     (c.lines ?? []).some((n: string) => n.toLowerCase().includes(q)) ||
     (supplierNames.get(c.id) ?? "").includes(q));
@@ -250,6 +251,12 @@ export default function ComponentsPage() {
                 <div className="flex-1 min-w-0">
                   <InlineText key={`name-${selected.id}`} className="text-xl font-semibold" value={selected.name}
                     onSave={(v) => v.trim() && patch.mutate({ name: v.trim() })} />
+                  <label className="block text-[10px] text-muted-foreground mt-1">
+                    Official name (as on the invoice)
+                    <InlineText key={`alt-${selected.id}`} className="text-xs text-foreground"
+                      value={(selected.altNames ?? []).join("; ")}
+                      onSave={(v) => patch.mutate({ altNames: v.split(";").map(x => x.trim()).filter(Boolean) })} />
+                  </label>
                   <div className="flex flex-wrap gap-2 mt-2">
                     <Badge variant="secondary">{COMPONENT_CATEGORIES[selected.category] ?? selected.category}</Badge>
                     {(selected.lines ?? []).map((n: string) => <Badge key={n} variant="outline">{n}</Badge>)}
