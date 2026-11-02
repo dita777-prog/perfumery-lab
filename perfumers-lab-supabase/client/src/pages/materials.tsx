@@ -428,7 +428,15 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
   const commitEdit = () => {
     if (!editField) return;
     const val = editValue.replace(",", ".");
-    if (editField === "inventory") {
+    if ((editField === "inventory" || editField === "costManual") && sources.length > 1) {
+      // Several purchases: the top fields show totals/averages — writing them into
+      // one purchase would silently overwrite its history. Edit per purchase instead.
+      toast({
+        title: `${sources.length} purchases on this material`,
+        description: "Edit stock, price and date of each purchase in the Suppliers tab.",
+        variant: "destructive",
+      });
+    } else if (editField === "inventory") {
       // Update the first source's stockGrams, or create a source if none
       if (sources.length > 0) {
         updateSourceMut.mutate({ id: sources[0].id, data: { stockGrams: val || null } });
@@ -459,7 +467,13 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
   const handleDateSelect = (date: Date | undefined) => {
     if (!date) return;
     const dateStr = format(date, "yyyy-MM-dd");
-    if (sources.length > 0) {
+    if (sources.length > 1) {
+      toast({
+        title: `${sources.length} purchases on this material`,
+        description: "Change the date of each purchase in the Suppliers tab.",
+        variant: "destructive",
+      });
+    } else if (sources.length > 0) {
       updateSourceMut.mutate({ id: sources[0].id, data: { purchaseDate: dateStr } });
     } else {
       createSourceMut.mutate({ materialId: material.id, purchaseDate: dateStr, stockGrams: "0" });
@@ -669,14 +683,16 @@ function MaterialDetail({ material, families, sources, suppliers }: any) {
                 open={dateOpen}
                 onOpenChange={setDateOpen}
                 onSave={(dateStr) => {
-                  if (sources.length > 0) {
+                  if (sources.length > 1) {
+                    toast({ title: `${sources.length} purchases on this material`, description: "Change the date of each purchase in the Suppliers tab.", variant: "destructive" });
+                  } else if (sources.length > 0) {
                     updateSourceMut.mutate({ id: sources[0].id, data: { purchaseDate: dateStr } });
                   } else {
                     createSourceMut.mutate({ materialId: material.id, purchaseDate: dateStr, stockGrams: "0" });
                   }
                 }}
                 onRemove={() => {
-                  if (sources.length > 0) {
+                  if (sources.length === 1) {
                     updateSourceMut.mutate({ id: sources[0].id, data: { purchaseDate: null } });
                   }
                 }}
@@ -871,7 +887,10 @@ function CostCalculatorDialog({ open, onOpenChange, materialId, sources }: any) 
   });
 
   const handleApply = () => {
-    if (sources.length > 0) {
+    if (sources.length > 1) {
+      toast({ title: `${sources.length} purchases on this material`, description: "Enter price and quantity per purchase in the Suppliers tab.", variant: "destructive" });
+      onOpenChange(false);
+    } else if (sources.length > 0) {
       updateMut.mutate({ id: sources[0].id, data: { purchasePrice: totalPrice, purchaseQuantityGrams: quantity, pricePerGram: String(ppg) } });
     } else {
       createMut.mutate({ materialId, purchasePrice: totalPrice, purchaseQuantityGrams: quantity, pricePerGram: String(ppg), stockGrams: quantity });
@@ -1012,12 +1031,15 @@ function SupplierRecordForm({ materialId, suppliers, existing, onClose }: any) {
   const [purchaseDate, setPurchaseDate] = useState(existing?.purchaseDate || "");
   const [purchasePrice, setPurchasePrice] = useState(existing?.purchasePrice || "");
   const [purchaseQty, setPurchaseQty] = useState(existing?.purchaseQuantityGrams || "");
+  const [shippingCost, setShippingCost] = useState(existing?.shippingCost || "");
   const [stockGrams, setStockGrams] = useState(existing?.stockGrams || "");
   const [reorderThreshold, setReorderThreshold] = useState(existing?.reorderThresholdGrams || "");
   const [notes, setNotes] = useState(existing?.notes || "");
 
-  const computedPPG = purchasePrice && purchaseQty
-    ? (parseFloat(purchasePrice) / parseFloat(purchaseQty)).toFixed(4) : "";
+  // Price per gram includes shipping/extra costs of the purchase.
+  const landedTotal = (parseFloat(purchasePrice) || 0) + (parseFloat(shippingCost) || 0);
+  const computedPPG = purchasePrice && purchaseQty && parseFloat(purchaseQty) > 0
+    ? (landedTotal / parseFloat(purchaseQty)).toFixed(4) : "";
 
   const createMut = useMutation({
     mutationFn: (data: any) => existing
@@ -1031,8 +1053,8 @@ function SupplierRecordForm({ materialId, suppliers, existing, onClose }: any) {
   });
 
   function handleSave() {
-    const ppg = purchasePrice && purchaseQty
-      ? String(parseFloat(purchasePrice) / parseFloat(purchaseQty))
+    const ppg = purchasePrice && purchaseQty && parseFloat(purchaseQty) > 0
+      ? String(landedTotal / parseFloat(purchaseQty))
       : "";
     createMut.mutate({
       materialId,
@@ -1042,6 +1064,7 @@ function SupplierRecordForm({ materialId, suppliers, existing, onClose }: any) {
       purchaseDate: purchaseDate || null,
       purchasePrice: purchasePrice || null,
       purchaseQuantityGrams: purchaseQty || null,
+      shippingCost: shippingCost || null,
       pricePerGram: ppg || null,
       stockGrams: stockGrams || "0",
       reorderThresholdGrams: reorderThreshold || null,
@@ -1068,8 +1091,9 @@ function SupplierRecordForm({ materialId, suppliers, existing, onClose }: any) {
         <Input placeholder="Purchase price (€)" value={purchasePrice} onChange={e => setPurchasePrice(e.target.value)} className="h-8 text-xs" type="number" step="0.01" />
         <Input placeholder="Quantity (g)" value={purchaseQty} onChange={e => setPurchaseQty(e.target.value)} className="h-8 text-xs" type="number" step="0.01" />
       </div>
+      <Input placeholder="Shipping / extra costs (€) — added to the price per gram" value={shippingCost} onChange={e => setShippingCost(e.target.value)} className="h-8 text-xs" type="number" step="0.01" />
       {computedPPG && (
-        <p className="text-xs text-[hsl(183,70%,50%)]">Calculated: € {fmtNum(computedPPG, 4)}/g</p>
+        <p className="text-xs text-[hsl(183,70%,50%)]">Calculated: € {fmtNum(computedPPG, 4)}/g{parseFloat(shippingCost) > 0 ? " (incl. shipping)" : ""}</p>
       )}
 
       <div className="grid grid-cols-2 gap-2">
