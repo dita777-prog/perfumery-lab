@@ -79,6 +79,7 @@ export type MaterialSource = {
   purchaseDate: string | null;
   purchasePrice: string | null;
   purchaseQuantityGrams: string | null;
+  shippingCost?: string | null;
   pricePerGram: string | null;
   stockGrams: string | null;
   reorderThresholdGrams: string | null;

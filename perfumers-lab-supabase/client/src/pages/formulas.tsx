@@ -18,6 +18,45 @@ import { fmtNum, fmtGrams, fmtPercent, postJson, patchJson, deleteJson, recalcPe
 import { neatGramsOf, weighedGramsOf, dilutionSolventGrams, neatMultiplierFor, stockDeductionGrams } from "@/lib/dilution";
 
 /** Coerce any value to a string safely (Supabase NUMERIC can return as number or string). */
+/** Oldest purchase first (purchase date, then creation time). */
+function fifoSorted(sources: any[]): any[] {
+  const key = (x: any) => String(x.purchaseDate ?? x.purchase_date ?? "") + "|" + String(x.createdAt ?? x.created_at ?? "");
+  return sources.slice().sort((a, b) => key(a).localeCompare(key(b)));
+}
+
+/**
+ * Split a deduction across purchases: the chosen source first, then the rest
+ * oldest to newest. A source never goes below zero; only when ALL sources are
+ * exhausted does the shortfall land on the chosen source.
+ */
+function allocateFromSources(
+  sources: any[],
+  grams: number,
+  preferredId: string | null | undefined,
+): { sourceId: string; grams: number }[] {
+  const order = fifoSorted(sources);
+  const pref = order.find((x) => x.id === preferredId);
+  const ordered = pref ? [pref, ...order.filter((x) => x.id !== pref.id)] : order;
+  const out: { sourceId: string; grams: number }[] = [];
+  let left = grams;
+  for (const src of ordered) {
+    if (left <= 1e-9) break;
+    const avail = Math.max(0, parseFloat(src.stockGrams || "0") || 0);
+    const take = Math.min(avail, left);
+    if (take > 0) {
+      out.push({ sourceId: src.id, grams: take });
+      left -= take;
+    }
+  }
+  if (left > 1e-9 && ordered.length > 0) {
+    const target = (pref ?? ordered[0]).id;
+    const ex = out.find((o) => o.sourceId === target);
+    if (ex) ex.grams += left;
+    else out.push({ sourceId: target, grams: left });
+  }
+  return out;
+}
+
 function asString(v: unknown): string {
   if (v === null || v === undefined) return "";
   return typeof v === "string" ? v : String(v);
@@ -2165,12 +2204,10 @@ function CreateProductionBatchDialog({
           (s: number, src: any) => s + parseFloat(src.stockGrams || "0"),
           0,
         );
-        const defaultSource = sourcesForMat
-          .slice()
-          .sort(
-            (a: any, b: any) =>
-              parseFloat(b.stockGrams || "0") - parseFloat(a.stockGrams || "0"),
-          )[0];
+        // FIFO: default to the oldest purchase that still has stock.
+        const defaultSource = fifoSorted(sourcesForMat).find(
+          (src: any) => parseFloat(src.stockGrams || "0") > 0,
+        ) || fifoSorted(sourcesForMat)[0];
         return {
           ingredientId: ing.id,
           materialId: ing.materialId,
@@ -2335,21 +2372,28 @@ const insufficientStockRows = useMemo(
         const note = row.isDiluted
           ? `Auto-deducted for batch ${batchLabel} — diluted (weighed ${fmtGrams(row.gramsToWeigh)})`
           : `Auto-deducted for batch ${batchLabel}`;
-        await postJson("/api/stock-movements", {
-          materialSourceId: sourceId,
-          movementType: "production",
-          gramsDelta: String(-row.gramsToDeduct * batchScaleFactor),
-          batchLabel,
-          productionBatchId: batch.id,
-          relatedFormulaId: formula.id,
-          notes: note,
-        });
-        deductionCount += 1;
-
-        // Accumulate cost based on neat grams consumed from this source
-        const src = materialSources.find((ms: any) => ms.id === sourceId);
-        const pricePerGram = parseFloat(src?.pricePerGram || src?.price_per_gram || "0") || 0;
-        totalBatchCost += row.neatGrams * batchScaleFactor * pricePerGram;
+        const totalDeduct = row.gramsToDeduct * batchScaleFactor;
+        const neatShare = row.gramsToDeduct > 0 ? row.neatGrams / row.gramsToDeduct : 1;
+        const parts = allocateFromSources(row.sources, totalDeduct, sourceId);
+        for (const part of parts) {
+          const partNote = parts.length > 1
+            ? `${note} — part ${fmtGrams(part.grams)} of ${fmtGrams(totalDeduct)} (FIFO split)`
+            : note;
+          await postJson("/api/stock-movements", {
+            materialSourceId: part.sourceId,
+            movementType: "production",
+            gramsDelta: String(-part.grams),
+            batchLabel,
+            productionBatchId: batch.id,
+            relatedFormulaId: formula.id,
+            notes: partNote,
+          });
+          deductionCount += 1;
+          // Cost: neat grams consumed from THIS purchase x its own price per gram
+          const src = materialSources.find((ms: any) => ms.id === part.sourceId);
+          const pricePerGram = parseFloat(src?.pricePerGram || src?.price_per_gram || "0") || 0;
+          totalBatchCost += part.grams * neatShare * pricePerGram;
+        }
       }
 
       // Deduct sub-formula (accord) ingredients from formula inventory ledger.
